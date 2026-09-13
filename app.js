@@ -1,0 +1,1254 @@
+import {
+  analyze,
+  toSources,
+  compareFeatures,
+  ComparisonValidator,
+  summarize,
+  testFrame,
+  clamp,
+} from "./analysis.js";
+import { ShadowAudio } from "./audio.js";
+const $ = (id) => document.getElementById(id),
+  canvases = ["live", "analysis", "generated", "spatial"].map($),
+  contexts = canvases.map((c) =>
+    c.getContext("2d", { willReadFrequently: true }),
+  ),
+  video = $("video"),
+  scratch = document.createElement("canvas"),
+  sc = scratch.getContext("2d", { willReadFrequently: true }),
+  audio = new ShadowAudio(),
+  validator = new ComparisonValidator();
+let stream = null,
+  imageSource = null,
+  fileURL = null,
+  source = "demo",
+  running = true,
+  frameNumber = 0,
+  view = "bands",
+  background = null,
+  backgroundId = null,
+  features = null,
+  comparison = null,
+  sources = [],
+  previousSources = [],
+  lastFrame = 0,
+  lastLog = 0,
+  lastGeneration = 0,
+  generationBusy = false,
+  generationEpoch = 0,
+  generationAbort = null,
+  uploadComparison = null,
+  socket = null,
+  lastBridge = 0,
+  frameToken = 0,
+  lastSourceTime = -1,
+  db = null,
+  records = [];
+const speakers = [
+  [-1.2, -1.3, 0.319],
+  [1.2, -1.3, 0.319],
+  [-1.2, -1.3, 0.715],
+  [1.2, -1.3, 0.715],
+  [-1.2, 0.65, 0.319],
+  [1.2, 0.65, 0.319],
+  [-1.2, 0.65, 0.715],
+  [1.2, 0.65, 0.715],
+  [-1.2, -1.3, 1.65],
+  [1.2, -1.3, 1.65],
+  [-1.2, 1.3, 1.65],
+  [1.2, 1.3, 1.65],
+  [0, -1.3, 0.319],
+].map((v, i) => ({
+  id: i + 1,
+  group: i < 4 ? "前面" : i < 8 ? "間仕切り" : i < 12 ? "天井" : "Sub",
+  x: v[0],
+  y: v[1],
+  z: v[2],
+  gainDb: 0,
+  delayMs: 0,
+  polarity: 1,
+  eq: [],
+  measured: false,
+}));
+function options() {
+  return {
+    bands: Number($("bands").value),
+    threshold: Number($("threshold").value),
+    gamma: Number($("gamma").value),
+    roi: Number($("roi").value) / 100,
+    background,
+    frequencyMin: Number($("frequency-min").value),
+    frequencyMax: Number($("frequency-max").value),
+    spread: Number($("spread").value),
+    reverb: Number($("reverb").value),
+  };
+}
+function notice(text, error = false) {
+  $("notice").textContent = text;
+  $("notice").style.color = error ? "#ffb7b7" : "#bdb9cd";
+}
+function resetComparison() {
+  generationEpoch++;
+  generationAbort?.abort();
+  comparison = null;
+  validator.reset();
+  $("difference").textContent = "Δ —";
+  $("comparison-state").textContent = "同一条件の解析を待機";
+  $("generation-note").textContent =
+    $("comparison").value === "none" ? "比較像は未接続" : "比較を準備中";
+}
+function resetAnalysis() {
+  background = null;
+  backgroundId = null;
+  previousSources = [];
+  resetComparison();
+  $("capture-bg").textContent = "明るい基準を取得";
+}
+function muteBridge() {
+  if (socket?.readyState === WebSocket.OPEN)
+    socket.send(JSON.stringify({ type: "mute" }));
+}
+async function stopCamera() {
+  frameToken++;
+  muteBridge();
+  audio.update([], speakers);
+  if (stream) for (const t of stream.getTracks()) t.stop();
+  stream = null;
+  video.pause();
+  video.srcObject = null;
+  video.removeAttribute("src");
+  video.load();
+  lastSourceTime = -1;
+}
+async function listCameras() {
+  if (!navigator.mediaDevices?.enumerateDevices) return;
+  const chosen = $("camera").value,
+    devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+      (d) => d.kind === "videoinput",
+    );
+  $("camera").replaceChildren(new Option("Mac の標準カメラ", ""));
+  devices.forEach((d, i) =>
+    $("camera").add(new Option(d.label || `カメラ ${i + 1}`, d.deviceId)),
+  );
+  if (devices.some((d) => d.deviceId === chosen)) $("camera").value = chosen;
+}
+async function connectCamera() {
+  const deviceId = $("camera").value;
+  await stopCamera();
+  const token = frameToken;
+  $("camera-start").disabled = true;
+  try {
+    if (!navigator.mediaDevices?.getUserMedia)
+      throw Error(
+        "カメラを利用できません。HTTPS または localhost で開いてください。",
+      );
+    const media = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 24, max: 30 },
+      },
+    });
+    if (token !== frameToken) {
+      media.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    stream = media;
+    imageSource = null;
+    video.srcObject = stream;
+    await video.play();
+    if (token !== frameToken) {
+      media.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    source = "camera";
+    $("source").value = "camera";
+    running = true;
+    resetAnalysis();
+    await listCameras();
+    if (token !== frameToken) return;
+    const track = media.getVideoTracks()[0],
+      s = track.getSettings();
+    $("source-detail").textContent =
+      `${s.width} × ${s.height} · ${track.label}`;
+    $("input-label").textContent = "LIVE CAMERA";
+    $("state").textContent = "カメラ入力";
+    track.addEventListener("ended", () => {
+      running = false;
+      resetComparison();
+      muteBridge();
+      audio.stop();
+      $("audio-status").textContent = "カメラ切断 · 音を停止";
+      notice("カメラが切断されました。再接続してください。", true);
+    });
+    notice(
+      "明るい面だけを映して基準を取得し、その範囲に影を入れてください。カメラ映像は保存しません。",
+    );
+  } catch (e) {
+    notice(
+      {
+        NotAllowedError:
+          "カメラが許可されていません。ブラウザとMacの設定で許可してから再接続してください。",
+        NotFoundError: "カメラが見つかりません。",
+        NotReadableError:
+          "カメラを開けません。他のアプリで使用中か確認してください。",
+        OverconstrainedError:
+          "選択したカメラを利用できません。別の入力を選んでください。",
+      }[e.name] || e.message,
+      true,
+    );
+    if (token === frameToken && !stream) {
+      resetAnalysis();
+      imageSource = null;
+      running = false;
+      muteBridge();
+      audio.stop();
+      $("state").textContent = "カメラ未接続";
+    }
+  } finally {
+    $("camera-start").disabled = false;
+  }
+}
+async function setSource(value) {
+  if (value === "camera") return connectCamera();
+  if (value === "file") {
+    $("file").click();
+    return;
+  }
+  await stopCamera();
+  source = "demo";
+  imageSource = null;
+  running = true;
+  $("source").value = "demo";
+  $("state").textContent = "テスト信号";
+  $("input-label").textContent = "TEST SIGNAL";
+  $("source-detail").textContent = "合成した階調信号 · 実測ではありません";
+  resetAnalysis();
+  notice(
+    "合成したテスト信号を解析しています。実測にはカメラ入力へ切り替えてください。",
+  );
+}
+function drawSource(t, w, h) {
+  scratch.width = w;
+  scratch.height = h;
+  if (source === "demo")
+    sc.putImageData(new ImageData(testFrame(w, h, t / 1000), w, h), 0, 0);
+  else {
+    const input = imageSource || video;
+    if (!imageSource && video.readyState < 2) return null;
+    sc.save();
+    if ($("mirror").checked) {
+      sc.translate(w, 0);
+      sc.scale(-1, 1);
+    }
+    sc.drawImage(input, 0, 0, w, h);
+    sc.restore();
+  }
+  return sc.getImageData(0, 0, w, h);
+}
+const displayScratch = document.createElement("canvas"),
+  displayCtx = displayScratch.getContext("2d");
+function showFrame(ctx, data, w, h) {
+  displayScratch.width = w;
+  displayScratch.height = h;
+  displayCtx.putImageData(new ImageData(data, w, h), 0, 0);
+  ctx.clearRect(0, 0, 640, 400);
+  ctx.drawImage(displayScratch, 0, 0, 640, 400);
+}
+function path(ctx, poly, project) {
+  ctx.beginPath();
+  poly.forEach((p, i) => {
+    const q = project(p);
+    i ? ctx.lineTo(...q) : ctx.moveTo(...q);
+  });
+  ctx.closePath();
+}
+function renderAnalysis(f) {
+  const ctx = contexts[1],
+    out = new Uint8ClampedArray(f.width * f.height * 4);
+  for (let i = 0; i < f.width * f.height; i++) {
+    const j = i * 4,
+      b = f.quantized[i] / (f.bands - 1);
+    if (view === "penumbra") {
+      const v = f.penumbra[i] ? clamp(f.gradients[i] * 15) : 0;
+      out[j] = 35 + v * 133;
+      out[j + 1] = 30 + v * 115;
+      out[j + 2] = 45 + v * 210;
+    } else if (view === "contour") {
+      const v = f.mask[i] ? 42 : 20;
+      out[j] = v;
+      out[j + 1] = v;
+      out[j + 2] = v + 6;
+    } else {
+      out[j] = f.mask[i] ? Math.round(36 + b * 150) : 20;
+      out[j + 1] = f.mask[i] ? Math.round(30 + b * 133) : 20;
+      out[j + 2] = f.mask[i] ? Math.round(57 + b * 185) : 27;
+    }
+    out[j + 3] = 255;
+  }
+  showFrame(ctx, out, f.width, f.height);
+  ctx.strokeStyle = "#c6b5ff";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const p of f.contours) {
+    ctx.moveTo(p[0] * 640, p[1] * 400);
+    ctx.lineTo(p[2] * 640, p[3] * 400);
+  }
+  ctx.stroke();
+  const stride = Math.max(1, Math.floor(f.bands / 9));
+  if (view !== "penumbra")
+    for (let i = 0; i < f.bands; i += stride) {
+      const poly = f.layers[i].cell.polygon;
+      if (poly.length) {
+        ctx.strokeStyle = "rgba(207,197,246,.24)";
+        path(ctx, poly, (p) => [p[0] * 640, p[1] * 400]);
+        ctx.stroke();
+      }
+    }
+  const [x, y] = f.centroid;
+  ctx.strokeStyle = "#f2ebff";
+  ctx.beginPath();
+  ctx.moveTo(x * 640 - 7, y * 400);
+  ctx.lineTo(x * 640 + 7, y * 400);
+  ctx.moveTo(x * 640, y * 400 - 7);
+  ctx.lineTo(x * 640, y * 400 + 7);
+  ctx.stroke();
+  const max = Math.max(1, ...f.histogram);
+  ctx.fillStyle = "#a895ff";
+  for (let i = 0; i < f.bands; i++) {
+    const bh = (35 * f.histogram[i]) / max;
+    ctx.fillRect(
+      (i * 640) / f.bands,
+      400 - bh,
+      Math.max(1, 640 / f.bands - 0.5),
+      bh,
+    );
+  }
+  const physical = Number($("physical-width").value),
+    scale = physical > 0 ? physical / f.width : 1,
+    unit = physical > 0 ? "mm" : "px";
+  $("area").textContent = `${(f.area * 100).toFixed(1)}%`;
+  $("darkness").textContent = f.darkness.toFixed(3);
+  $("penumbra").textContent = `${(f.penumbraWidth * scale).toFixed(1)} ${unit}`;
+  $("perimeter").textContent = `${Math.round(f.perimeter * scale)} ${unit}`;
+  $("band-note").textContent =
+    `${f.bands} TONE BANDS · ${f.layers.filter((l) => l.count > 0).length} OCCUPIED`;
+}
+function renderSpatial(f) {
+  const ctx = contexts[3];
+  ctx.clearRect(0, 0, 640, 400);
+  const project = (x, y, z) => [320 + x * 180 + y * 55, 340 + y * 36 - z * 245];
+  ctx.strokeStyle = "#34303f";
+  ctx.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const x = k / 2 - 1;
+    ctx.beginPath();
+    ctx.moveTo(...project(x, -1, 0));
+    ctx.lineTo(...project(x, 1, 0));
+    ctx.stroke();
+  }
+  for (let k = 0; k <= 4; k++) {
+    const y = k / 2 - 1;
+    ctx.beginPath();
+    ctx.moveTo(...project(-1, y, 0));
+    ctx.lineTo(...project(1, y, 0));
+    ctx.stroke();
+  }
+  const stride = Math.max(1, Math.floor(f.bands / 32));
+  for (let i = 0; i < f.bands; i += stride) {
+    const l = f.layers[i];
+    if (!l.area) continue;
+    const z = l.tone,
+      opacity = 0.15 + 0.65 * clamp(Math.sqrt(l.density) * 12);
+    path(ctx, l.cell.polygon, (p) =>
+      project((p[0] - 0.5) * 2, (p[1] - 0.5) * 2, z),
+    );
+    ctx.fillStyle = `rgba(149,134,204,${opacity * 0.15})`;
+    ctx.strokeStyle = `rgba(182,164,236,${opacity})`;
+    ctx.fill();
+    ctx.stroke();
+    const xy = project((l.centroid[0] - 0.5) * 2, (l.centroid[1] - 0.5) * 2, z);
+    ctx.fillStyle = "#cfbfff";
+    ctx.beginPath();
+    ctx.arc(...xy, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (comparison?.valid) {
+    path(
+      ctx,
+      comparison.features.layers.filter((l) => l.area > 0).at(-1)?.cell
+        .polygon ?? [],
+      (p) => project((p[0] - 0.5) * 2, (p[1] - 0.5) * 2, -0.04),
+    );
+    ctx.strokeStyle = "#b5a0ff";
+    ctx.fillStyle = "#7860da44";
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.font = "13px monospace";
+  ctx.fillStyle = "#b5accc";
+  const low = Number($("frequency-min").value),
+    high = Number($("frequency-max").value);
+  for (const z of [0, 0.25, 0.5, 0.75, 1]) {
+    const p = project(1.1, 0, z);
+    ctx.fillText(
+      `${Math.round(low * (high / low) ** z)} Hz`,
+      p[0] + 7,
+      p[1] + 4,
+    );
+  }
+  ctx.fillStyle = "#83739f";
+  ctx.fillText("40 Hz · comparison", 18, 28);
+  ctx.fillText("XYZ / CELL CENTROID", 18, 49);
+  $("voice-count").textContent =
+    `${f.bands} + ${comparison?.valid ? 1 : 0} LAYERS`;
+}
+function transformFrame(frame, amount) {
+  const w = frame.width,
+    h = frame.height,
+    input = frame.data,
+    output = new Uint8ClampedArray(input.length);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const sx = Math.round(
+          clamp(x + Math.sin((y / h) * 6.28) * amount * w * 0.12, 0, w - 1),
+        ),
+        sy = Math.round(
+          clamp(y + Math.cos((x / w) * 6.28) * amount * h * 0.09, 0, h - 1),
+        ),
+        i = (y * w + x) * 4,
+        j = (sy * w + sx) * 4;
+      for (let c = 0; c < 3; c++)
+        output[i + c] = clamp(input[j + c] * (1 - amount * 0.18), 0, 255);
+      output[i + 3] = 255;
+    }
+  return output;
+}
+async function decodeImage(url) {
+  if (
+    typeof url !== "string" ||
+    (!url.startsWith("data:image/") && !url.startsWith("blob:"))
+  )
+    throw Error("画像は data:image または blob 形式が必要です。");
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  return img;
+}
+function imagePixels(img, w, h) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const cctx = c.getContext("2d", { willReadFrequently: true });
+  cctx.drawImage(img, 0, 0, w, h);
+  return cctx.getImageData(0, 0, w, h).data;
+}
+async function updateComparison(frame, real, sourceId, at, t) {
+  const mode = $("comparison").value;
+  if (mode === "none") {
+    contexts[2].clearRect(0, 0, 640, 400);
+    contexts[2].fillStyle = "#9e96ad";
+    contexts[2].font = "16px sans-serif";
+    contexts[2].fillText("比較像を接続すると、差分が音に加わります。", 30, 194);
+    return;
+  }
+  if (generationBusy || t - lastGeneration < (mode === "endpoint" ? 1200 : 300))
+    return;
+  lastGeneration = t;
+  generationBusy = true;
+  const epoch = generationEpoch,
+    settings = options();
+  try {
+    let data,
+      origin,
+      generatedAt = Date.now(),
+      generatedFrom = sourceId,
+      generatedId = crypto.randomUUID();
+    if (mode === "transform") {
+      data = transformFrame(frame, Number($("deviation").value));
+      origin = "変形テスト · AI未使用";
+    } else if (mode === "file") {
+      if (!uploadComparison) return;
+      data = imagePixels(uploadComparison, frame.width, frame.height);
+      origin = "読込画像 · 静的な比較参照（音へは未採用）";
+    } else {
+      const endpoint = $("endpoint").value;
+      if (!endpoint) {
+        $("generation-note").textContent =
+          "生成サービスの URL を設定してください";
+        return;
+      }
+      const u = new URL(endpoint);
+      if (
+        u.protocol !== "https:" &&
+        !["127.0.0.1", "localhost"].includes(u.hostname)
+      )
+        throw Error("生成サービスにはHTTPSを使用してください。");
+      const c = document.createElement("canvas");
+      c.width = frame.width;
+      c.height = frame.height;
+      c.getContext("2d").putImageData(frame, 0, 0);
+      generationAbort = new AbortController();
+      const timeout = setTimeout(() => generationAbort?.abort(), 4500);
+      const result = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: c.toDataURL("image/jpeg", 0.85),
+          sourceId,
+          sourceAt: at,
+          prompt: nextPrompt(real, comparison?.label ?? "hold"),
+          strength: Number($("deviation").value),
+        }),
+        signal: generationAbort.signal,
+      });
+      clearTimeout(timeout);
+      if (!result.ok) throw Error(`生成サービス: ${result.status}`);
+      const response = await result.json();
+      if (response.provider !== "StreamDiffusion")
+        throw Error("生成元に StreamDiffusion の識別がありません。");
+      generatedAt = response.generatedAt;
+      generatedFrom = response.sourceId;
+      generatedId = response.generatedId;
+      data = imagePixels(
+        await decodeImage(response.image),
+        frame.width,
+        frame.height,
+      );
+      origin = "StreamDiffusion · 外部接続";
+    }
+    if (epoch !== generationEpoch) return;
+    const gf = analyze(data, frame.width, frame.height, settings),
+      distance = compareFeatures(real, gf),
+      checked =
+        mode === "file"
+          ? {
+              valid: false,
+              label: "hold",
+              reason: "静的参照 · 生成の由来は未検証",
+            }
+          : validator.validate({
+              sourceId,
+              generatedFrom,
+              generatedId,
+              sourceAt: at,
+              generatedAt,
+              distance,
+              target: Number($("target").value),
+            });
+    comparison = {
+      ...checked,
+      features: gf,
+      pairedReal: summarize(real),
+      distance,
+      origin,
+      sourceId,
+      generatedId,
+      sourceAt: at,
+      generatedAt,
+    };
+    showFrame(contexts[2], data, frame.width, frame.height);
+    contexts[2].strokeStyle = "#bda8ff";
+    contexts[2].lineWidth = 1.2;
+    for (let i = 0; i < gf.bands; i += Math.max(1, Math.floor(gf.bands / 9))) {
+      path(contexts[2], gf.layers[i].cell.polygon, (p) => [
+        p[0] * 640,
+        p[1] * 400,
+      ]);
+      contexts[2].stroke();
+    }
+    $("generation-note").textContent = origin;
+    $("comparison-state").textContent =
+      `${checked.reason} · ${checked.label.toUpperCase()} · 遅延 ${Date.now() - at}ms`;
+    $("difference").textContent = `Δ ${distance.toFixed(3)}`;
+  } catch (e) {
+    if (epoch === generationEpoch) {
+      comparison = null;
+      validator.reset();
+      $("comparison-state").textContent = "比較を保留 · 実像の解析は継続";
+      $("generation-note").textContent = e.message;
+      $("difference").textContent = "Δ —";
+    }
+  } finally {
+    generationBusy = false;
+  }
+}
+function nextPrompt(f, label) {
+  const history = records.slice(-12),
+    mean = history.length
+      ? history.reduce((a, r) => a + r.analysis.darkness, 0) / history.length
+      : f.darkness;
+  return `Observe an Asama volcanic stone shadow. Preserve the originating contour. ${label === "depart" ? "Gently increase tonal and contour variation." : label === "converge" ? "Bring the contour closer to the observed shadow." : "Hold the current relationship."} Darkness ${f.darkness.toFixed(3)}, recent mean ${mean.toFixed(3)}, area ${f.area.toFixed(3)}, penumbra ${f.penumbraWidth.toFixed(2)} analysis pixels. No human identity, no robot commands.`;
+}
+function smoothSources(values, dt) {
+  const keep = Math.pow(Number($("smoothing").value), dt / 100),
+    map = new Map(previousSources.map((s) => [s.id, s]));
+  for (const s of values) {
+    const prev = map.get(s.id);
+    if (prev)
+      for (const k of ["x", "y", "z", "spread", "reverb"])
+        s[k] = prev[k] * keep + s[k] * (1 - keep);
+  }
+  previousSources = values.map((s) => ({ ...s }));
+  return values;
+}
+function recordState(at, id) {
+  if (!features) return;
+  const label = comparison?.valid ? comparison.label : "hold",
+    line =
+      label === "depart"
+        ? "由来を保ちながら、比較像の変化を少し広げる。"
+        : label === "converge"
+          ? "比較像と実像の距離を少し縮める。"
+          : "現在の関係を保ち、影の変化を観測する。";
+  const record = {
+    id: crypto.randomUUID(),
+    at: new Date(at).toISOString(),
+    source,
+    sourceId: id,
+    analysis: summarize(features),
+    settings: {
+      ...options(),
+      background: background ? "captured" : "none",
+      backgroundId,
+      physicalWidthMm: Number($("physical-width").value),
+    },
+    comparison: comparison
+      ? {
+          distance: comparison.distance,
+          valid: comparison.valid,
+          label: comparison.label,
+          origin: comparison.origin,
+          sourceId: comparison.sourceId,
+          generatedId: comparison.generatedId,
+          sourceAt: comparison.sourceAt,
+          generatedAt: comparison.generatedAt,
+          analysis: summarize(comparison.features),
+          pairedReal: comparison.pairedReal,
+        }
+      : null,
+    label,
+    trace: line,
+    nextPrompt: nextPrompt(features, label),
+  };
+  records.push(record);
+  if (records.length > 10000) records.shift();
+  $("trace-label").textContent = label.toUpperCase();
+  $("trace-current").textContent = line;
+  const item = document.createElement("div");
+  item.className = "trace-item";
+  const time = document.createElement("time");
+  time.textContent = new Date(at).toLocaleTimeString("ja-JP");
+  item.append(time, document.createTextNode(label.toUpperCase()));
+  const p = document.createElement("p");
+  p.textContent = `暗度 ${features.darkness.toFixed(3)} · 面積 ${(features.area * 100).toFixed(1)}%${comparison ? ` · Δ ${comparison.distance.toFixed(3)}` : ""}`;
+  item.append(p);
+  $("timeline").prepend(item);
+  while ($("timeline").children.length > 60) $("timeline").lastChild.remove();
+  if (db) {
+    const tx = db.transaction("states", "readwrite");
+    tx.objectStore("states").put(record);
+    if (records.length === 10000) {
+      const cutoff = records[0].at;
+      tx
+        .objectStore("states")
+        .index("at")
+        .openCursor(IDBKeyRange.upperBound(cutoff, true)).onsuccess = (e) => {
+        const c = e.target.result;
+        if (c) {
+          c.delete();
+          c.continue();
+        }
+      };
+    }
+  }
+  if (
+    $("speak").checked &&
+    "speechSynthesis" in window &&
+    !speechSynthesis.speaking
+  ) {
+    const u = new SpeechSynthesisUtterance(`${label}。${line}`);
+    u.lang = "ja-JP";
+    u.volume = Math.min(0.6, audio.volume);
+    speechSynthesis.speak(u);
+  }
+}
+function tick(t) {
+  requestAnimationFrame(tick);
+  if (!running || document.hidden || t - lastFrame < 85) return;
+  const dt = t - lastFrame;
+  lastFrame = t;
+  try {
+    if (
+      source !== "demo" &&
+      !imageSource &&
+      video.currentTime === lastSourceTime
+    )
+      return;
+    lastSourceTime = video.currentTime;
+    const start = performance.now(),
+      w = Number($("resolution").value),
+      h = Math.round(w * 0.625),
+      frame = drawSource(t, w, h);
+    if (!frame) return;
+    const at = Date.now(),
+      id = `${source}-${++frameNumber}-${at}`;
+    features = analyze(frame.data, w, h, options());
+    showFrame(contexts[0], frame.data, w, h);
+    const roi = Number($("roi").value) / 100;
+    if (roi < 1) {
+      contexts[0].strokeStyle = "#c0aaff";
+      contexts[0].setLineDash([5, 4]);
+      contexts[0].strokeRect(
+        (1 - roi) * 320,
+        (1 - roi) * 200,
+        640 * roi,
+        400 * roi,
+      );
+      contexts[0].setLineDash([]);
+    }
+    renderAnalysis(features);
+    if (comparison && Date.now() - comparison.sourceAt > 5000) {
+      comparison.valid = false;
+      comparison.label = "hold";
+      $("comparison-state").textContent = "比較が古いため保留";
+    }
+    sources = smoothSources(toSources(features, options(), comparison), dt);
+    audio.update(sources, speakers);
+    renderSpatial(features);
+    updateComparison(frame, features, id, at, t);
+    if (t - lastLog > 5000) {
+      lastLog = t;
+      recordState(at, id);
+    }
+    if (socket?.readyState === WebSocket.OPEN && t - lastBridge > 100) {
+      lastBridge = t;
+      socket.send(
+        JSON.stringify({
+          type: "state",
+          version: 1,
+          at,
+          sourceId: id,
+          sources: sources.map(({ polygon, ...s }) => s),
+          speakers,
+          volume: audio.volume,
+          mode: "shadow-audio-only",
+        }),
+      );
+    }
+    const elapsed = performance.now() - start;
+    $("performance").textContent =
+      `${w}×${h} · ${elapsed.toFixed(0)} ms · ${Math.min(12, 1000 / dt).toFixed(1)} fps`;
+  } catch (e) {
+    running = false;
+    muteBridge();
+    audio.stop();
+    notice(`解析を停止しました: ${e.message}`, true);
+    $("state").textContent = "停止";
+  }
+}
+function download(name, data, type = "application/json") {
+  const u = URL.createObjectURL(new Blob([data], { type })),
+    a = document.createElement("a");
+  a.href = u;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(u), 1000);
+}
+function renderSpeakers() {
+  const table = document.createElement("table"),
+    head = table.createTHead().insertRow();
+  for (const s of [
+    "Ch",
+    "配置",
+    "X m",
+    "Y m",
+    "Z m",
+    "Gain dB",
+    "Delay ms",
+    "極性",
+  ]) {
+    const th = document.createElement("th");
+    th.textContent = s;
+    head.append(th);
+  }
+  for (const sp of speakers) {
+    const tr = table.insertRow();
+    tr.insertCell().textContent = String(sp.id);
+    tr.insertCell().textContent = sp.group;
+    for (const k of ["x", "y", "z", "gainDb", "delayMs", "polarity"]) {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.value = sp[k];
+      input.step = k === "polarity" ? "2" : ".01";
+      input.min =
+        k === "polarity"
+          ? "-1"
+          : k === "delayMs" || k === "z"
+            ? "0"
+            : k === "gainDb"
+              ? "-60"
+              : "-20";
+      input.max =
+        k === "polarity"
+          ? "1"
+          : k === "delayMs"
+            ? "1000"
+            : k === "gainDb"
+              ? "12"
+              : "20";
+      input.setAttribute("aria-label", `Ch${sp.id} ${k}`);
+      input.onchange = () => {
+        const v = Number(input.value);
+        if (
+          !Number.isFinite(v) ||
+          v < Number(input.min) ||
+          v > Number(input.max) ||
+          (k === "polarity" && Math.abs(v) !== 1)
+        ) {
+          input.value = sp[k];
+          notice("校正値が範囲外です。", true);
+          return;
+        }
+        sp[k] = v;
+        sp.measured = false;
+        $("calibration-note").textContent =
+          "編集した校正値。会場での測定・確認は未完了です。";
+      };
+      tr.insertCell().append(input);
+    }
+  }
+  $("speaker-table").replaceChildren(table);
+}
+function validateCalibration(data) {
+  if (!Array.isArray(data.speakers) || data.speakers.length !== 13)
+    throw Error("13chの校正データが必要です。");
+  return data.speakers.map((s, i) => {
+    if (
+      s.id !== i + 1 ||
+      !["x", "y", "z", "gainDb", "delayMs", "polarity"].every((k) =>
+        Number.isFinite(s[k]),
+      )
+    )
+      throw Error("校正値の形式が無効です。");
+    if (
+      Math.abs(s.x) > 20 ||
+      Math.abs(s.y) > 20 ||
+      s.z < 0 ||
+      s.z > 20 ||
+      s.gainDb < -60 ||
+      s.gainDb > 12 ||
+      s.delayMs < 0 ||
+      s.delayMs > 1000 ||
+      Math.abs(s.polarity) !== 1
+    )
+      throw Error("校正値が範囲外です。");
+    if (
+      s.eq &&
+      (!Array.isArray(s.eq) ||
+        s.eq.length > 4 ||
+        s.eq.some(
+          (e) =>
+            !Number.isFinite(e.frequency) ||
+            e.frequency < 20 ||
+            e.frequency > 20000 ||
+            !Number.isFinite(e.q) ||
+            e.q < 0.1 ||
+            e.q > 20 ||
+            !Number.isFinite(e.gainDb) ||
+            Math.abs(e.gainDb) > 12,
+        ))
+    )
+      throw Error("EQは最大4バンド、20–20000Hz、Q 0.1–20、±12dBです。");
+    return {
+      ...speakers[i],
+      ...s,
+      group: speakers[i].group,
+      measured: s.measured === true,
+    };
+  });
+}
+$("camera-start").onclick = connectCamera;
+$("camera").onchange = () => {
+  if (source === "camera") connectCamera();
+};
+$("source").onchange = (e) => setSource(e.target.value);
+navigator.mediaDevices?.addEventListener("devicechange", () =>
+  listCameras().catch(() => {}),
+);
+listCameras().catch(() => {});
+$("file").onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f) {
+    $("source").value = source;
+    return;
+  }
+  try {
+    await stopCamera();
+    if (fileURL) URL.revokeObjectURL(fileURL);
+    fileURL = URL.createObjectURL(f);
+    imageSource = null;
+    if (f.type.startsWith("image/")) imageSource = await decodeImage(fileURL);
+    else if (f.type.startsWith("video/")) {
+      video.src = fileURL;
+      video.loop = true;
+      await video.play();
+    } else throw Error("画像または動画を選択してください。");
+    source = "file";
+    $("source").value = "file";
+    running = true;
+    resetAnalysis();
+    $("state").textContent = "ファイル入力";
+    $("input-label").textContent = "LOCAL FILE";
+    $("source-detail").textContent = f.name;
+    notice("読み込んだファイルをこの端末で解析しています。");
+  } catch (e) {
+    notice(e.message, true);
+  }
+};
+$("file").oncancel = () => {
+  $("source").value = source;
+};
+$("comparison").onchange = () => {
+  resetComparison();
+  if ($("comparison").value === "file") $("comparison-file").click();
+};
+$("comparison-file").onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const u = URL.createObjectURL(f);
+  try {
+    uploadComparison = await decodeImage(u);
+    resetComparison();
+  } catch (e) {
+    notice(e.message, true);
+  } finally {
+    URL.revokeObjectURL(u);
+  }
+};
+for (const id of [
+  "threshold",
+  "gamma",
+  "smoothing",
+  "spread",
+  "reverb",
+  "volume",
+])
+  $(id).oninput = () => {
+    const value = Number($(id).value);
+    $(id + "-value").textContent =
+      id === "volume" ? `${Math.round(value * 100)}%` : value.toFixed(2);
+    if (id === "volume") audio.volume = value;
+    if (["threshold", "gamma"].includes(id)) resetComparison();
+  };
+for (const id of ["bands", "resolution", "roi", "mirror"])
+  $(id).onchange = resetAnalysis;
+for (const id of ["frequency-min", "frequency-max"])
+  $(id).onchange = () => {
+    const low = clamp(Number($("frequency-min").value), 20, 1000),
+      high = clamp(
+        Number($("frequency-max").value),
+        Math.max(200, low + 1),
+        16000,
+      );
+    $("frequency-min").value = low;
+    $("frequency-max").value = high;
+  };
+$("capture-bg").onclick = () => {
+  if (!features) return;
+  const frame = drawSource(performance.now(), features.width, features.height);
+  if (!frame) return;
+  background = new Float32Array(features.width * features.height);
+  let mean = 0;
+  for (let i = 0; i < background.length; i++) {
+    background[i] =
+      (0.2126 * frame.data[i * 4] +
+        0.7152 * frame.data[i * 4 + 1] +
+        0.0722 * frame.data[i * 4 + 2]) /
+      255;
+    mean += background[i];
+  }
+  if (mean / background.length < 0.15) {
+    background = null;
+    notice("基準が暗すぎます。影のない明るい面で取得してください。", true);
+    return;
+  }
+  backgroundId = crypto.randomUUID();
+  resetComparison();
+  $("capture-bg").textContent = "基準を再取得";
+  notice("明るい基準を取得しました。影を入れて観測してください。");
+};
+$("reset").onclick = () => {
+  for (const [k, v] of Object.entries({
+    threshold: 0.12,
+    gamma: 1,
+    smoothing: 0.7,
+    spread: 1,
+    reverb: 0.5,
+    roi: 100,
+    "physical-width": 0,
+    "frequency-min": 110,
+    "frequency-max": 3520,
+    bands: 256,
+    resolution: 320,
+    target: 0.12,
+    deviation: 0.25,
+  })) {
+    $(k).value = v;
+    if ($(k + "-value")) $(k + "-value").textContent = Number(v).toFixed(2);
+  }
+  $("mirror").checked = false;
+  resetAnalysis();
+  notice("解析と音響の設定を初期値に戻しました。");
+};
+document.querySelectorAll("[data-view]").forEach(
+  (b) =>
+    (b.onclick = () => {
+      view = b.dataset.view;
+      document
+        .querySelectorAll("[data-view]")
+        .forEach((x) => x.classList.toggle("active", x === b));
+    }),
+);
+const audioMode = document.createElement("select");
+audioMode.id = "audio-mode";
+audioMode.setAttribute("aria-label", "音声出力モード");
+audioMode.add(new Option("ステレオ試聴", "stereo"));
+audioMode.add(new Option("12.1ch 直接出力", "discrete"));
+$("audio-status").after(audioMode);
+$("audio-start").onclick = async () => {
+  try {
+    if (audio.context) {
+      await audio.stop();
+      $("audio-start").textContent = "ブラウザで試聴";
+      $("audio-status").textContent = "音響停止";
+      return;
+    }
+    if (source === "camera" && !stream) {
+      await connectCamera();
+      if (!stream) return;
+    }
+    if (source === "file" && !imageSource && video.readyState < 2) {
+      notice("動画を選び直して再開してください。", true);
+      return;
+    }
+    running = true;
+    await audio.start(audioMode.value);
+    $("audio-start").textContent = "音をミュート";
+    $("audio-status").textContent =
+      audio.mode === "discrete"
+        ? "12.1ch · ブラウザ直接出力"
+        : "STEREO MONITOR · 再生中";
+    notice(
+      audio.mode === "discrete"
+        ? "13chへ出力中。ブラウザの距離重み付けレンダラーです。Spat5出力はブリッジ経由で行います。"
+        : "影の階調ごとの音が鳴っています。停止ボタンでカメラと音を停止できます。",
+    );
+  } catch (e) {
+    notice(`音を開始できません: ${e.message}`, true);
+  }
+};
+$("stop").onclick = async () => {
+  running = false;
+  resetComparison();
+  await stopCamera();
+  await audio.stop();
+  socket?.close();
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  $("audio-start").textContent = "ブラウザで試聴";
+  $("audio-status").textContent = "停止中";
+  $("state").textContent = "停止";
+  notice(
+    "カメラ・解析・音・外部送信を停止しました。入力を選択すると再開します。",
+  );
+};
+let maxFeedbackAt = 0;
+function clearMaxStatus(message) {
+  $("max-status").textContent = message;
+  for (const [id, label] of [["max-rx","受信"],["max-dsp","DSP"],["max-pre","音源"],["max-out","出力"]]) $(id).textContent = label + " —";
+}
+function connectMax() {
+  if (socket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(socket.readyState)) { socket.close(); return; }
+  try {
+    const url = new URL($("bridge-url").value);
+    if (!["ws:", "wss:"].includes(url.protocol)) throw Error("ws:// または wss:// を指定してください。");
+    const current = new WebSocket(url); socket = current;
+    $("bridge-state").textContent = "接続中"; clearMaxStatus("接続中");
+    current.onopen = () => { if(socket!==current)return; $("bridge-state").textContent = "接続済み · Max応答待ち"; $("max-connect").textContent="Max接続を解除"; };
+    current.onmessage = (e) => {
+      if(socket!==current)return;
+      try {
+        const d = JSON.parse(e.data);
+        if (d.type === "ack") $("bridge-state").textContent = `送信中 · ${d.sources}音源`;
+        if (d.type === "error") clearMaxStatus(`送信エラー: ${d.message}`);
+        if (d.type !== "max-status") return;
+        if(!d.connected) { clearMaxStatus("Maxから応答なし · パッチを開いてください"); return; }
+        maxFeedbackAt=Date.now();
+        const db = v => v > .000001 ? (20*Math.log10(v)).toFixed(1)+" dBFS" : "無音";
+        $("max-status").textContent = `${d.matched && d.rxAlive ? "Max受信を確認" : "Max応答あり · このUIの入力待ち"} · ${d.mode === "stereo" ? "ステレオ" : "12.1ch"} · master ${d.masterDb} dB`;
+        $("max-rx").textContent = `受信 ${d.matched&&d.rxAlive ? d.active+"音源" : "待機"}`;
+        $("max-dsp").textContent = `DSP ${d.dsp ? "ON / "+d.sampleRate+" Hz" : "OFF → Maxの③"}`;
+        $("max-pre").textContent = "音源 " + db(d.prePeak);
+        $("max-out").textContent = "出力 " + db(d.outPeak);
+      } catch {}
+    };
+    current.onclose = () => { if(socket!==current)return; $("bridge-state").textContent="未接続"; $("max-connect").textContent="Maxへ接続";maxFeedbackAt=0;clearMaxStatus("Max未接続"); };
+    current.onerror = () => { if(socket!==current)return; clearMaxStatus("接続できません · Maxの①で起動し、このMacの接続用UIを開いてください"); };
+  } catch(e) { notice(e.message,true); }
+}
+$("bridge-connect").onclick = connectMax;
+$("max-connect").onclick = connectMax;
+setInterval(()=>{if(maxFeedbackAt && Date.now()-maxFeedbackAt>2000) {maxFeedbackAt=0;clearMaxStatus("Max応答が途切れました");}},500);
+if(new URLSearchParams(location.search).get("max")==="1" && ["127.0.0.1","localhost"].includes(location.hostname)) connectMax();
+$("download-state").onclick = () =>
+  download(
+    "shadow-state.json",
+    JSON.stringify(
+      {
+        at: new Date().toISOString(),
+        version: 1,
+        sources,
+        speakers,
+        analysis: features ? summarize(features) : null,
+      },
+      null,
+      2,
+    ),
+  );
+$("export").onclick = () =>
+  download(
+    "shadow-traces.jsonl",
+    records.map((x) => JSON.stringify(x)).join("\n"),
+    "application/x-ndjson",
+  );
+$("clear-log").onclick = () => {
+  records = [];
+  $("timeline").replaceChildren();
+  if (db) db.transaction("states", "readwrite").objectStore("states").clear();
+  notice("この端末の観測記録を消去しました。");
+};
+$("calibration-export").onclick = () =>
+  download(
+    "speaker-calibration.json",
+    JSON.stringify(
+      { version: 1, renderer: "Spat5 via bridge", speakers },
+      null,
+      2,
+    ),
+  );
+$("calibration-import").onchange = async (e) => {
+  try {
+    const f = e.target.files[0];
+    if (!f) return;
+    const validated = validateCalibration(JSON.parse(await f.text()));
+    speakers.splice(0, 13, ...validated);
+    renderSpeakers();
+    $("calibration-note").textContent = validated.every((x) => x.measured)
+      ? "読み込んだ測定値を使用。測定の妥当性は会場で確認してください。"
+      : "校正値を読み込みました。未測定チャンネルが含まれます。";
+  } catch (e) {
+    notice(e.message, true);
+  }
+};
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    audio.update([], speakers);
+    if (socket?.readyState === WebSocket.OPEN)
+      socket.send(JSON.stringify({ type: "mute" }));
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
+  }
+});
+window.addEventListener("pagehide", () => {
+  stopCamera();
+  audio.stop();
+  socket?.close();
+});
+try {
+  const request = indexedDB.open("desymmetrical-traces", 1);
+  request.onupgradeneeded = () => {
+    const s = request.result.createObjectStore("states", { keyPath: "id" });
+    s.createIndex("at", "at");
+  };
+  request.onsuccess = () => {
+    db = request.result;
+    const q = db
+      .transaction("states")
+      .objectStore("states")
+      .index("at")
+      .getAll();
+    q.onsuccess = () => {
+      records = q.result.slice(-10000);
+      if (records.length)
+        notice(
+          `この端末の過去の観測 ${records.length}件を読み込みました。テスト信号で再開しています。`,
+        );
+    };
+  };
+  request.onerror = () =>
+    notice(
+      "記録の保存領域を利用できません。この画面を開いている間の記録は書き出せます。",
+    );
+} catch {}
+renderSpeakers();
+requestAnimationFrame(tick);
+export function getStatus() {
+  return {
+    source,
+    running,
+    bands: Number($("bands").value),
+    audio: audio.context?.state ?? "stopped",
+    analysis: features ? summarize(features) : null,
+    comparison: comparison
+      ? {
+          valid: comparison.valid,
+          label: comparison.label,
+          distance: comparison.distance,
+        }
+      : null,
+    recordCount: records.length,
+  };
+}
+if (document.modelContext?.registerTool) {
+  const controller = new AbortController();
+  const tools = [
+    {
+      name: "read_shadow_analysis",
+      description: "Read current shadow analysis, input and audio status.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true },
+      execute: () => getStatus(),
+    },
+    {
+      name: "configure_shadow_bands",
+      description:
+        "Set the same 16, 64 or 256 tone-band setting visible in the UI.",
+      inputSchema: {
+        type: "object",
+        properties: { bands: { type: "integer", enum: [16, 64, 256] } },
+        required: ["bands"],
+        additionalProperties: false,
+      },
+      execute: (input) => {
+        if (![16, 64, 256].includes(input?.bands))
+          throw Error("bands must be 16, 64 or 256");
+        $("bands").value = input.bands;
+        resetAnalysis();
+        return { bands: input.bands };
+      },
+    },
+  ];
+  for (const tool of tools) {
+    try {
+      Promise.resolve(
+        document.modelContext.registerTool(tool, { signal: controller.signal }),
+      ).catch(() => {});
+    } catch {}
+  }
+  window.addEventListener("pagehide", () => controller.abort(), { once: true });
+}

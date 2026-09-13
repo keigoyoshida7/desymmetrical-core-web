@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>接続仕様 · De-symmetrical Adaptation</title>
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+      main {
+        max-width: 1000px;
+        line-height: 1.9;
+      }
+      h2 {
+        font-size: 1.3rem;
+        margin: 36px 0 16px;
+      }
+      pre {
+        overflow: auto;
+        background: #202029;
+        padding: 20px;
+        border: 1px solid #393443;
+        font-size: 14px;
+      }
+      li {
+        margin: 10px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a href="./">← 観測画面へ</a>
+      <h1 style="margin-top: 28px">接続仕様・使い方</h1>
+      <h2>カメラから音へ</h2>
+      <ol>
+        <li>
+          カメラを選択し「カメラを接続」。ブラウザとMacのカメラ許可を有効にします。マイクは使用しません。
+        </li>
+        <li>
+          影がない明るい面で「明るい基準を取得」。影を入れ、必要なら中央の解析範囲を絞ります。
+        </li>
+        <li>
+          16 / 64 /
+          256階調を選択。「ブラウザで試聴」で試聴します。暗い階調ほど低い周波数・低い高さへ写像します。
+        </li>
+        <li>
+          「停止」で入力・音・外部送信を止めます。記録は解析値だけで、画像は保存しません。
+        </li>
+      </ol>
+      <h2>測定の意味</h2>
+      <p>
+        単眼カメラは暗い物体と影を完全には識別できません。階調はブラウザのRGBに基づきます。半影幅は勾配による推定値です。実寸入力は平面の単純な換算で、レンズや遠近の補正ではありません。
+      </p>
+      <p>
+        Voronoiは各累積階調の輪郭を凸包に変換し、辺を垂直二等分線とする隣接種を作って計算します。元の凹形状は輪郭表示に残ります。セルの重心・面積が音の位置・広がりに対応します。
+      </p>
+      <h2 id="max">Max / Spat5：①〜⑤の手順</h2>
+      <p><a href="./De-symmetrical-Max.zip">Max一式をダウンロード</a>し、フォルダー内の <code>max/De-symmetrical-257-Spat5.maxpat</code> をMax 9で開きます。Spat5が必要です。フォルダー構成はそのまま使います。</p>
+      <ol>
+        <li><strong>① 接続サービスを起動</strong>。ランプ点灯後「Web UIを開く」。ローカルUIは自動接続します。公開版では「Maxへ接続」。キー1でも起動できます。</li>
+        <li><strong>② オーディオ設定</strong>で内蔵出力などを選択。キー2で設定を開けます。</li>
+        <li><strong>③ DSPをON</strong>。実際のDSP状態ランプも確認。キー3で切り替えます。</li>
+        <li><strong>④ ステレオ試聴／12.1chと音量</strong>。このMacだけの試聴はステレオ。マスター初期値は -24 dB。Web側の音量も反映されます。</li>
+        <li><strong>⑤ 5秒テスト音</strong>でメーターを確認。キー5でも実行できます。Web入力が届くとテストを終了します。その後、Webでカメラ等の入力を選びます。</li>
+      </ol>
+      <p>Maxに送るのは音源の制御値で、音はMax内で合成します。「ブラウザで試聴」はMax出力には不要です。STOP（キー0／Esc）でDSPもOFF。MaxがunlockedならCommand+Eでロックします。番号キーはパッチ前面、数値入力を終えてから使います。</p>
+      <p><strong>受信</strong>は実際のMaxフレーム受信。<strong>A</strong>は全音源の絶対値合計、<strong>B</strong>はSpat5の12出力、<strong>C</strong>は選択モードの出力直前のピークです。WebにもMaxから実測値とフレーム番号が戻ります。送信成功だけでは「Max受信確認」にはなりません。-120 dBFSは無音表示です。</p>
+      <p>13本のメーターは校正後・マスター前。Cが動いても聞こえない時は②の出力デバイス、I/O Mappings、スピーカー側の音量を確認します。13ch出力には対応機器が必要です。EQは会場プロセッサで設定します。</p>
+      <p>接続先：WebSocket 127.0.0.1:8788 → OSC 9000、Maxからの返送9001。HTTPSページから接続できない場合は <a href="http://127.0.0.1:5173/?max=1">このMacの接続用UI</a> を使用します。パッチの二重起動を避けてください。</p>
+      <h2>StreamDiffusion HTTP</h2>
+      <p>
+        このモードを選んだ場合だけ、入力画像を設定した生成サービスへ送ります。モデルはWebページには同梱されません。外部サービスはCORSを設定し、次の形式を扱ってください。
+      </p>
+      <pre>
+POST /generate
+{
+  "image": "data:image/jpeg;base64,...",
+  "sourceId": "camera-42-...",
+  "sourceAt": 1789300000000,
+  "prompt": "Observe an Asama volcanic stone shadow...",
+  "strength": 0.25
+}
+
+200 OK
+{
+  "provider": "StreamDiffusion",
+  "sourceId": "camera-42-...",
+  "generatedId": "unique-result-id",
+  "generatedAt": 1789300000300,
+  "image": "data:image/png;base64,..."
+}</pre
+      >
+      <p>
+        由来ID一致、5秒以内の鮮度、有限で範囲内の差分、3回の独立した結果を確認して採用します。比較像と対応した元の解析を記録し、現時点のライブ画像と取り違えません。「画像を読込」は静的な参照なので、生成由来の証拠として扱いません。
+      </p>
+      <h2>記録と限界</h2>
+      <p>
+        解析値はこのブラウザ内に最大10,000件保存し、古い順に入れ替えます。JSONLで書き出せます。リアル画像・生成画像は保存しません。公開の複数端末アーカイブではありません。
+      </p>
+      <p>
+        depart / converge / hold
+        と次のプロンプトは、現在はローカルの規則で作成します。LLMではありません。ロボット・照明指令は出しません。資料の会場設備、24.6MP/Mono12カメラ、光学精度、部屋の測定、長期連続運転の実証は別途必要です。
+      </p>
+    </main>
+  </body>
+</html>
