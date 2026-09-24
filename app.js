@@ -7,7 +7,7 @@ import {
   testFrame,
   clamp,
 } from "./analysis.js";
-import { ShadowAudio } from "./audio.js";
+import { ShadowAudio } from "./audio.js?v=mobile-audio-1";
 import { CHAPTERS, getChapter, normalizeSoundSettings, applyChapter } from "./chapters.js";
 import { renderSignalField } from "./field-visual.js";
 import { createCoreSpeakers } from "./core-layout.js";
@@ -129,6 +129,19 @@ const MESSAGES = {
   "17.1ch 直接出力": "17.1ch direct output",
   "ブラウザで試聴": "Start audio",
   "音響停止": "Audio stopped",
+  "音の準備中…": "Preparing audio…",
+  "音を準備しています…": "Preparing audio…",
+  "音を再開": "Resume audio",
+  "音を再試行": "Retry audio",
+  "音声が一時停止中 · 再開してください": "Audio paused · Tap Resume audio",
+  "音声エラー · 再試行できます": "Audio error · Tap Retry audio",
+  "このブラウザは音声再生に対応していません。SafariまたはChromeで開いてください。": "Audio playback is unavailable here. Open this page in Safari or Chrome.",
+  "このブラウザは音声処理に対応していません。SafariまたはChromeで開いてください。": "Audio processing is unavailable here. Open this page in Safari or Chrome.",
+  "音声の開始が保留されています。もう一度再生ボタンを押してください。": "Audio start is pending. Tap the audio button again.",
+  "音声の読み込みが完了しませんでした。ページを再読み込みしてください。": "Audio could not finish loading. Reload this page.",
+  "音声処理が中断されました。再生ボタンで再試行してください。": "Audio processing was interrupted. Tap the audio button to retry.",
+  "音声を再開できません。再生ボタンで再試行してください。": "Audio could not resume. Tap the audio button to retry.",
+
   "動画を選び直して再開してください。": "Select the video again to resume.",
   "音をミュート": "Mute audio",
   "17.1ch · ブラウザ直接出力": "17.1ch · Browser direct output",
@@ -858,16 +871,6 @@ function recordState(at, id) {
       };
     }
   }
-  if (
-    $("speak").checked &&
-    "speechSynthesis" in window &&
-    !speechSynthesis.speaking
-  ) {
-    const u = new SpeechSynthesisUtterance(`${label}. ${localize(line)}`);
-    u.lang = getLanguage() === "en" ? "en-GB" : "ja-JP";
-    u.volume = Math.min(0.6, audio.volume);
-    speechSynthesis.speak(u);
-  }
 }
 function tick(t) {
   requestAnimationFrame(tick);
@@ -1217,35 +1220,55 @@ function updateAudioModeLabels() {
 }
 updateAudioModeLabels();
 $("audio-status").after(audioMode);
+function syncAudioControls() {
+  const state = audio.state;
+  $("audio-start").disabled = state === "starting";
+  if (state === "starting") {
+    setText("audio-start", "音の準備中…");
+    setText("audio-status", "音を準備しています…");
+  } else if (state === "running") {
+    setText("audio-start", "音をミュート");
+    setText("audio-status", audio.mode === "discrete" ? "17.1ch · ブラウザ直接出力" : "STEREO MONITOR · 再生中");
+  } else if (state === "suspended" || state === "interrupted") {
+    setText("audio-start", "音を再開");
+    setText("audio-status", "音声が一時停止中 · 再開してください");
+  } else if (state === "error") {
+    setText("audio-start", "音を再試行");
+    setText("audio-status", "音声エラー · 再試行できます");
+    notice(`音を開始できません: ${audio.error}`, true);
+  } else {
+    setText("audio-start", "ブラウザで試聴");
+    setText("audio-status", "音響停止");
+  }
+}
+audio.onstatechange = syncAudioControls;
 $("audio-start").onclick = async () => {
   try {
-    if (audio.context) {
+    if (audio.state === "starting") return;
+    if (audio.state === "running") {
       await audio.stop();
-      setText("audio-start", "ブラウザで試聴");
-      setText("audio-status", "音響停止");
       return;
-    }
-    if (!frozenStudy && source === "camera" && !stream) {
-      await connectCamera();
-      if (!stream) return;
     }
     if (!frozenStudy && source === "file" && !imageSource && video.readyState < 2) {
       notice("動画を選び直して再開してください。", true);
       return;
     }
+    const needsCamera = !frozenStudy && source === "camera" && !stream;
     running = true;
-    await audio.start(audioMode.value);
-    setText("audio-start", "音をミュート");
-    setText("audio-status", audio.mode === "discrete"
-        ? "17.1ch · ブラウザ直接出力"
-        : "STEREO MONITOR · 再生中");
-    notice(
+    // Unlock audio in the tap itself, before waiting for camera permission or downloads.
+    const started = audio.context && audio.node && !audio.error
+      ? audio.resume() : audio.start(audioMode.value);
+    await Promise.all([started, needsCamera ? connectCamera() : Promise.resolve()]);
+    if (needsCamera && !stream) { await audio.stop(); return; }
+    audio.update(sources, speakers);
+    syncAudioControls();
+    if (audio.state === "running") notice(
       audio.mode === "discrete"
         ? "18chへ出力中。ブラウザの距離重み付けレンダラーです。会場用Spat5のレンダリングとは異なります。"
         : "影の階調ごとの音が鳴っています。停止ボタンでカメラと音を停止できます。",
     );
   } catch (e) {
-    notice(`音を開始できません: ${e.message}`, true);
+    if (e.message !== "音の開始を取り消しました。") notice(`音を開始できません: ${e.message}`, true);
   }
 };
 $("stop").onclick = async () => {
@@ -1254,7 +1277,6 @@ $("stop").onclick = async () => {
   await stopCamera();
   await audio.stop();
   socket?.close();
-  if ("speechSynthesis" in window) speechSynthesis.cancel();
   setText("audio-start", "ブラウザで試聴");
   setText("audio-status", "停止中");
   setText("state", "停止");
@@ -1358,7 +1380,6 @@ document.addEventListener("visibilitychange", () => {
     audio.update([], speakers);
     if (socket?.readyState === WebSocket.OPEN)
       socket.send(JSON.stringify({ type: "mute" }));
-    if ("speechSynthesis" in window) speechSynthesis.cancel();
   }
 });
 window.addEventListener("pagehide", () => {
@@ -1422,7 +1443,8 @@ export function getStatus() {
     source,
     running,
     bands: Number($("bands").value),
-    audio: audio.context?.state ?? "stopped",
+    audio: audio.state,
+    audioError: audio.error || null,
     analysis: features ? summarize(features) : null,
     comparison: comparison
       ? {

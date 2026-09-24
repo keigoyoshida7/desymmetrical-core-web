@@ -3,8 +3,25 @@ const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
 const bounded = (value, minimum, maximum, fallback) =>
   Math.min(maximum, Math.max(minimum, finite(value, fallback)));
 
+const audioTimeout = (promise, ms, message) => {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(Error(message)), ms); }),
+  ]).finally(() => clearTimeout(timer));
+};
+const closeContext = async context => {
+  if (context && context.state !== "closed") {
+    try { await context.close(); } catch { /* The OS may already have closed it. */ }
+  }
+};
+
 export class ShadowAudio {
   constructor() {
+    this.starting = false;
+    this.error = "";
+    this.onstatechange = null;
+    this.sessionRestore = null;
     this.context = null;
     this.node = null;
     this.volume = 0.2;
@@ -14,13 +31,45 @@ export class ShadowAudio {
     this.calibrationKey = "";
     this.discreteChannels = CORE_OUTPUT_CHANNELS;
   }
-  async start(mode = "stereo") {
-    await this.stop();
-    const epoch = ++this.epoch,
-      context = new AudioContext({ latencyHint: "interactive" });
-    this.context = context;
+  get state() {
+    return this.error ? "error" : this.starting ? "starting" : this.context?.state ?? "stopped";
+  }
+  emitState() { this.onstatechange?.(this.state); }
+  requestPlaybackSession() {
+    // Supported by Safari; playback audio should behave like media, not ambient UI sounds.
     try {
-      await context.resume();
+      const session = globalThis.navigator?.audioSession;
+      if (!session) return;
+      const type = session.type;
+      session.type = "playback";
+      this.sessionRestore = { session, type };
+    } catch { /* AudioSession is optional and may be restricted by the host app. */ }
+  }
+  restoreSession() {
+    const prior = this.sessionRestore;
+    this.sessionRestore = null;
+    try { if (prior?.session.type === "playback") prior.session.type = prior.type; } catch {}
+  }
+  async start(mode = "stereo") {
+    // Do not await close() before creating/resuming: both must run inside the tap.
+    const closing = this.stop();
+    const epoch = ++this.epoch;
+    let context;
+    this.starting = true;
+    this.mode = mode;
+    this.emitState();
+    try {
+      this.requestPlaybackSession();
+      const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext;
+      if (!AudioContextClass) throw Error("このブラウザは音声再生に対応していません。SafariまたはChromeで開いてください。");
+      context = new AudioContextClass({ latencyHint: "interactive" });
+      this.context = context;
+      context.onstatechange = () => { if (this.context === context) this.emitState(); };
+      const resumed = audioTimeout(context.resume(), 8000, "音声の開始が保留されています。もう一度再生ボタンを押してください。");
+      // Observe rejection immediately even if capability checks below fail synchronously.
+      resumed.catch(() => {});
+      if (!context.audioWorklet || !globalThis.AudioWorkletNode)
+        throw Error("このブラウザは音声処理に対応していません。SafariまたはChromeで開いてください。");
       const channels = mode === "discrete"
         ? Math.round(bounded(this.discreteChannels, 2, 32, CORE_OUTPUT_CHANNELS))
         : 2;
@@ -28,11 +77,14 @@ export class ShadowAudio {
         throw Error(
           `この出力は${context.destination.maxChannelCount}chまでです。Core 17.1chには18出力対応の機器・ブラウザ設定が必要です。ステレオ試聴も選べます。`,
         );
-      await context.audioWorklet.addModule(
-        new URL("./audio-worklet.js", import.meta.url),
-      );
+      await Promise.all([
+        closing,
+        resumed,
+        audioTimeout(context.audioWorklet.addModule(
+          new URL("./audio-worklet.js?v=mobile-audio-1", import.meta.url),
+        ), 15000, "音声の読み込みが完了しませんでした。ページを再読み込みしてください。"),
+      ]);
       if (epoch !== this.epoch) {
-        if (context.state !== "closed") await context.close();
         throw Error("音の開始を取り消しました。");
       }
       if (mode === "discrete") {
@@ -49,6 +101,13 @@ export class ShadowAudio {
         channelInterpretation: "discrete",
       });
       this.node = node;
+      node.onprocessorerror = () => {
+        if (this.node !== node) return;
+        this.error = "音声処理が中断されました。再生ボタンで再試行してください。";
+        this.restoreSession();
+        this.emitState();
+        void closeContext(context);
+      };
       const reverb = context.createConvolver(),
         length = Math.floor(context.sampleRate * 2.8),
         buffer = context.createBuffer(2, length, context.sampleRate);
@@ -120,12 +179,37 @@ export class ShadowAudio {
         }
         merge.connect(context.destination);
       }
-      this.mode = mode;
+      this.starting = false;
+      this.emitState();
     } catch (e) {
-      if (context.state !== "closed") await context.close();
-      if (this.context === context) {
+      if (context) context.onstatechange = null;
+      if (epoch === this.epoch) {
         this.context = null;
         this.node = null;
+        this.starting = false;
+        this.error = e.message;
+        this.restoreSession();
+        this.emitState();
+      }
+      await closeContext(context);
+      throw e;
+    }
+  }
+  async resume() {
+    const context = this.context, epoch = this.epoch;
+    if (!context || !this.node || this.error) return this.start(this.mode);
+    try {
+      // Called directly from the user's next tap after an iOS interruption.
+      const resumed = context.resume();
+      await audioTimeout(resumed, 8000, "音声を再開できません。再生ボタンで再試行してください。");
+      if (this.context !== context || epoch !== this.epoch) throw Error("音の開始を取り消しました。");
+      this.emitState();
+    } catch (e) {
+      if (this.context === context && epoch === this.epoch) {
+        this.error = e.message;
+        this.restoreSession();
+        this.emitState();
+        await closeContext(context);
       }
       throw e;
     }
@@ -163,11 +247,17 @@ export class ShadowAudio {
   }
   async stop() {
     this.epoch++;
-    const context = this.context;
+    const context = this.context, node = this.node;
+    if (context) context.onstatechange = null;
+    if (node) { node.onprocessorerror = null; try { node.disconnect(); } catch {} }
+    this.starting = false;
+    this.error = "";
     this.context = null;
     this.node = null;
     this.calibration = [];
     this.calibrationKey = "";
-    if (context && context.state !== "closed") await context.close();
+    this.restoreSession();
+    this.emitState();
+    await closeContext(context);
   }
 }
