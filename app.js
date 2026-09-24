@@ -1445,16 +1445,16 @@ if (document.modelContext?.registerTool) {
     {
       name: "configure_shadow_bands",
       description:
-        "Set the same 16, 30 or 64 tone-band setting visible in the UI.",
+        "Set the same 16 or 30 tone-band setting visible in the UI.",
       inputSchema: {
         type: "object",
-        properties: { bands: { type: "integer", enum: [16, 30, 64] } },
+        properties: { bands: { type: "integer", enum: [16, 30] } },
         required: ["bands"],
         additionalProperties: false,
       },
       execute: (input) => {
-        if (![16, 30, 64].includes(input?.bands))
-          throw Error("bands must be 16, 30 or 64");
+        if (![16, 30].includes(input?.bands))
+          throw Error("bands must be 16 or 30");
         $("bands").value = input.bands;
         resetAnalysis();
         return { bands: input.bands };

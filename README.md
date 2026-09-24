@@ -26,7 +26,7 @@ These are editable study proposals, not a fixed composition prescribed by the PD
 
 ## Core mapping
 
-The default analyzer uses **30 real-shadow layers + one validated comparison layer**. Optional 16 / 64-band modes retain the Adaptation experiments. Darkness maps to lower pitch/height; cell centroid to position, cell area to spread, and penumbra width to reverb. Coordinates assume an editable provisional 7 m room.
+The default analyzer uses **30 real-shadow layers + one validated comparison layer**. An optional 16-band mode retains the Adaptation experiment. Darkness maps to lower pitch/height; cell centroid to position, cell area to spread, and penumbra width to reverb. Coordinates assume an editable provisional 7 m room.
 
 Stereo listening is available on ordinary hardware. Discrete mode needs an audio device exposed by the browser with **18 outputs**: wall speakers 1–16, arm speaker 17, sub 18. The arm position is a manual placeholder. The browser's distance-weighted renderer is not IRCAM Spat 5. The sub receives low-frequency sources with a 100 Hz low-pass. Actual room calibration and hardware output assignment require onsite verification.
 
