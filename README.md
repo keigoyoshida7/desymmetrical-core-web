@@ -30,7 +30,7 @@ The default analyzer uses **30 real-shadow layers + one validated comparison lay
 
 Stereo listening is available on ordinary hardware. Discrete mode needs an audio device exposed by the browser with **18 outputs**: wall speakers 1–16, arm speaker 17, sub 18. The arm position is a manual placeholder. The browser's distance-weighted renderer is not IRCAM Spat 5. The sub receives low-frequency sources with a 100 Hz low-pass. Actual room calibration and hardware output assignment require onsite verification.
 
-The large central signal field is an interpretive visualization driven by the current measured layers, sound sources, chapter and waveform. It is not an acoustic measurement or hardware routing meter.
+The central study shows the actual threshold shadow boundary beneath cumulative convex tonal envelopes, stacked by mapped frequency. A logarithmic listening map preserves each tone layer’s identity and shows its fundamental or noise-band center. Harmonic relationships align the layers; spatial diffusion appears as schematic softness; interference shows paired frequencies (the envelope separation is enlarged for legibility). Frozen input stays geometrically stable across chapters. These are views of the sound mapping, not a measured spectrum or hardware routing meter.
 
 ## Scope and integrations
 

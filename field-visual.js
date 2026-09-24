@@ -1,202 +1,224 @@
-// Interpretive signal-field drawing. It visualizes analysis and organization;
-// these filaments are neither EEG measurements nor calibrated loudspeaker feeds.
+// A tonal topography of the acquired shadow, alongside its sound mapping.
+// Envelopes come from the analyzer's cumulative convex cells; the ground trace
+// is the actual threshold boundary. This is not a waveform or a speaker meter.
 const TAU = Math.PI * 2;
-const bounded = (v, low = 0, high = 1) => Math.max(low, Math.min(high, Number.isFinite(v) ? v : low));
-const value = (v, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
-const chapterKey = chapter => typeof chapter === 'string' ? chapter : chapter?.organization ?? chapter?.id ?? chapter?.chapterId ?? 'sustain';
+const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, Number.isFinite(v) ? v : lo));
 const mono = '"SFMono-Regular", Consolas, "Liberation Mono", monospace';
-
-function waveAt(phase, waveform) {
-  const phase01 = ((phase / TAU) % 1 + 1) % 1;
-  if (waveform === 'triangle') return 1 - 4 * Math.abs(phase01 - .5);
-  if (waveform === 'noise') return (Math.sin(phase * 7.31) + .5 * Math.sin(phase * 17.7)) / 1.5;
-  return Math.sin(phase);
-}
-
-// Resample an observed contour around its centroid. The radial scale is used
-// artistically in the central sculpture; source position/gain remain visible too.
-function contourProfile(layer, source) {
-  const polygon = source?.polygon ?? layer?.cell?.polygon ?? [];
-  const center = layer?.centroid ?? layer?.cell?.centroid ?? [.5, .5];
-  if (polygon.length < 3) return null;
-  const radial = polygon.map(p => ({
-    angle: (Math.atan2(p[1] - center[1], p[0] - center[0]) + TAU) % TAU,
-    radius: Math.hypot(p[0] - center[0], p[1] - center[1]),
-  })).sort((a, b) => a.angle - b.angle);
-  const mean = radial.reduce((sum, p) => sum + p.radius, 0) / radial.length;
-  return mean > 0 ? { radial, mean } : null;
-}
-function radiusAt(profile, angle) {
-  if (!profile) return 1;
-  const a = (angle + TAU) % TAU;
-  const list = profile.radial;
-  let upper = list.findIndex(p => p.angle >= a);
-  if (upper < 0) upper = 0;
-  const end = list[upper], start = list[(upper + list.length - 1) % list.length];
-  let da = end.angle - start.angle;
-  let position = a - start.angle;
-  if (da <= 0) da += TAU;
-  if (position < 0) position += TAU;
-  return bounded((start.radius + (end.radius - start.radius) * position / da) / profile.mean, .6, 1.5);
-}
-function text(ctx, label, x, y, color = '#777b7c', size = 9, align = 'left') {
-  ctx.fillStyle = color;
+const ink = '#d5d8d3';
+const muted = '#858d8e';
+const text = (ctx, label, x, y, size = 12, color = muted, align = 'left') => {
   ctx.font = `${size}px ${mono}`;
+  ctx.fillStyle = color;
   ctx.textAlign = align;
   ctx.fillText(label, x, y);
-}
-function line(ctx, x1, y1, x2, y2, stroke, width = .6) {
+};
+function line(ctx, x1, y1, x2, y2, color = '#2c3335', width = .8) {
   ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-  ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.stroke();
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke();
+}
+function path(ctx, points) {
+  if (!points.length) return;
+  ctx.beginPath(); ctx.moveTo(...points[0]);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(...points[i]);
+  ctx.closePath();
+}
+function dot(ctx, x, y, radius, color) {
+  ctx.beginPath(); ctx.arc(x, y, radius, 0, TAU); ctx.fillStyle = color; ctx.fill();
+}
+const hz = v => v >= 1000 ? `${+(v / 1000).toFixed(2)}k` : `${+v.toFixed(1)}`;
+
+// Pure mapping shared by the drawing and regression checks. No phase animation
+// is added: frozen acquisition and unchanged settings produce a stable image.
+export function buildFieldStudy(features, sources = [], settings = {}) {
+  const lo = Math.max(20, Number(settings.frequencyMin) || 110);
+  const hi = Math.max(lo + 1, Number(settings.frequencyMax) || 3520);
+  const position = f => clamp(Math.log(Math.max(lo, f) / lo) / Math.log(hi / lo));
+  const byId = new Map(sources.map(s => [s.id, s]));
+  const layers = (features?.layers ?? []).map(layer => {
+    const source = byId.get(layer.id);
+    const frequency = source?.frequency ?? lo * (hi / lo) ** layer.tone;
+    const separation = source?.detuneHz ?? 0;
+    return {
+      id: layer.id, tone: layer.tone, polygon: layer.cell?.polygon ?? [],
+      density: layer.density, gain: source?.gain ?? 0,
+      spread: source?.spread ?? 0, partial: source?.harmonicPartial ?? null,
+      frequency, height: position(frequency),
+      pair: [frequency - separation / 2, frequency + separation / 2],
+      separation,
+    };
+  });
+  return { layers, lo, hi, position, comparison: sources.some(s => s.id === 257 && s.gain > 0) };
 }
 
-export function renderSignalField(canvas, { features = null, sources = [], chapter = 'sustain', waveform = 'sine', time = 0, frozen = false } = {}) {
-  if (!canvas?.getContext) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  const width = canvas.width || 1500, height = canvas.height || 650;
-  ctx.save();
-  ctx.setTransform(width / 1500, 0, 0, height / 650, 0, 0);
-  ctx.clearRect(0, 0, 1500, 650);
-  ctx.fillStyle = '#070809'; ctx.fillRect(0, 0, 1500, 650);
-  const kind = chapterKey(chapter);
-  const t = frozen ? 0 : value(time);
-  const layers = features?.layers ?? [];
-  const sourceList = Array.isArray(sources) ? sources : [];
-  const sourceById = new Map(sourceList.map(s => [s.id, s]));
-  const hasData = layers.length > 0;
-  const layerCount = layers.length || 30;
-  const count = Math.min(30, layerCount);
-  const darkness = bounded(value(features?.darkness, .42));
-  const area = bounded(value(features?.area, .45));
-  const centroid = features?.centroid ?? [.5, .5];
-  const centerX = 750 + (value(centroid[0], .5) - .5) * 130;
-  const centerY = 315 + (value(centroid[1], .5) - .5) * 85;
-  const maxGain = Math.max(.008, ...sourceList.map(s => value(s.gain)));
-  const baseRadius = 232 + area * 74;
-  const drift = Math.sin(t * .18) * 5;
-  const warm = kind === 'interference' ? [200, 176, 147] : [190, 169, 146];
-
-  // Sparse registration marks keep the field a visual instrument, not a card.
-  for (const [x, y] of [[180, 70], [1320, 70], [180, 572], [1320, 572]]) {
-    line(ctx, x-4, y, x+4, y, '#333638'); line(ctx, x, y-4, x, y+4, '#333638');
-  }
-  text(ctx, 'INPUT', 36, 62, '#d3d1ca', 12);
-  text(ctx, `${String(layerCount).padStart(2, '0')} / TONE LAYERS`, 36, 81, '#9b9f9e', 10);
-  text(ctx, 'SPATIAL OUTPUT', 1464, 62, '#d3d1ca', 12, 'right');
-  text(ctx, '17 + SUB / PROVISIONAL', 1464, 81, '#9b9f9e', 10, 'right');
-  text(ctx, 'CONTOUR → SIGNAL FIELD', 750, 54, '#888e8f', 9, 'center');
-
-  // The right rail denotes the proposed output layout. Lines are associations,
-  // never fabricated measured speaker-level meters.
-  for (let j = 0; j < 18; j++) {
-    const y = 119 + j * 23;
-    const label = j < 16 ? `W${String(j+1).padStart(2,'0')}` : j === 16 ? 'ARM' : 'SUB';
-    text(ctx, label, 1455, y+3, j > 15 ? '#d4b698' : '#a1a7a6', 10, 'right');
-    line(ctx, 1334, y, 1410, y, j > 15 ? '#4b4238' : '#34383a');
-    ctx.fillStyle = j > 15 ? '#c2a080' : '#c4c4ba';
-    ctx.beginPath(); ctx.arc(1329, y, 1.7, 0, TAU); ctx.fill();
+function drawStrata(ctx, model, features, kind, box, mobile, ja) {
+  const { x, y, w, h } = box;
+  const font = mobile ? 19 : 12;
+  const cx = x + w * .50, baseY = y + h * .79;
+  const span = w * .71, rise = h * .53;
+  const project = (p, height = 0, offset = 0) => [
+    cx + (p[0] - .5) * span + (p[1] - .5) * span * .31,
+    baseY + (p[1] - .5) * h * .30 - (p[0] - .5) * h * .12 - height * rise + offset,
+  ];
+  const guide = [[.03,.04],[.97,.04],[.97,.96],[.03,.96]];
+  const floor = guide.map(p => project(p));
+  path(ctx, floor); ctx.strokeStyle = '#202729'; ctx.lineWidth = .8; ctx.stroke();
+  for (const p of [[.03,.04],[.97,.04],[.97,.96],[.03,.96],[.5,.5]]) {
+    const [px, py] = project(p);
+    line(ctx, px-4, py, px+4, py, '#4a5051');
+    line(ctx, px, py-4, px, py+4, '#4a5051');
   }
 
-  for (let i = 0; i < count; i++) {
-    const layerIndex = count === layerCount ? i : Math.round(i / Math.max(1, count-1) * (layerCount-1));
-    const layer = layers[layerIndex];
-    const source = sourceById.get(layer?.id ?? i+1) ?? sourceList[layerIndex];
-    const tone = bounded(value(source?.tone, value(layer?.tone, i / Math.max(1,count-1))));
-    const gain = bounded(value(source?.gain) / maxGain);
-    const density = bounded(Math.sqrt(value(layer?.density, 0)) * 5);
-    const signal = hasData ? Math.max(gain, density * .6) : .12;
-    const profile = contourProfile(layer, source);
-    const layerRadius = baseRadius * (.40 + tone * .74);
-    const sourceX = bounded(value(source?.x) / 3.5, -1, 1);
-    const sourceY = bounded(value(source?.y) / 3.5, -1, 1);
-    const phase = tone * TAU + t * .07;
-    const alpha = hasData ? .25 + signal * .62 : .10;
-    const colored = i % 7 === 2 || (kind === 'texture' && i % 3 === 0);
-    const rgb = colored ? warm : [235, 240, 237];
-    const inputY = 108 + i * 14.9;
-    const outIndex = i === count-1 ? 17 : Math.min(16, Math.floor(tone * 17));
-    const outputY = 119 + outIndex * 23;
-    const nodeX = 169;
-    const localX = centerX + sourceX * 60 + (tone-.5) * 67;
-    const localY = centerY + sourceY * 43 + drift + (tone-.5) * 75;
-    let points = [];
-    const segments = 128;
-    const shape = [];
-    // Smooth contour sampling preserves measured asymmetry without turning the
-    // field into a hard polygon stack. Cache it for all five visual strands.
-    for (let k = 0; k <= segments; k++) {
-      const theta = k / segments * TAU - Math.PI;
-      const angle = theta + Math.PI;
-      const contour = 1 + (
-        radiusAt(profile, angle) * .5 + radiusAt(profile, angle-.13) * .25 +
-        radiusAt(profile, angle+.13) * .25 - 1
-      ) * .38;
-      shape.push({ theta, contour });
-    }
-    // Four fine parallel strands per actual layer create a twisting ribbon.
-    // They share the layer's contour, gain, centroid and organization: they are
-    // visual detail, not additional inferred sources or measured channels.
-    for (let strand = 4; strand >= 0; strand--) {
-      const pairDrift = kind === 'interference' ? Math.sin(t * .28 + tone * TAU) * 8 : 0;
-      const ribbon = (strand-2) * (1.8 + signal * 1.7) + (kind === 'interference' ? (strand % 2 ? -1 : 1) * (10 + pairDrift) : 0);
-      const strandPoints = [];
-      for (let k = 0; k <= segments; k++) {
-        const { theta, contour } = shape[k];
-        const angle = theta + ribbon * .0012;
-        const radius = layerRadius + ribbon;
-        const depth = Math.sin(angle+.35+tone*1.7);
-        const sweep = Math.sin(angle*2+tone*.85+.5);
-        const curl = Math.cos(angle*3+tone*2.2);
-        const material = waveAt(angle * (kind === 'texture' ? 7 : 3) + phase, waveform) * (1.4 + signal * 3);
-        const spiral = kind === 'harmonic' ? Math.sin(angle*3+tone*4)*10 : 0;
-        const x = localX + Math.cos(angle)*radius*contour + sweep*radius*.17 + depth*27 + spiral;
-        const y = localY + Math.sin(angle)*radius*.66*contour + sweep*(34+darkness*20)
-          + Math.cos(angle)*(tone-.5)*92 + curl*12 + ribbon*Math.cos(angle*2+tone) + material;
-        strandPoints.push([x,y,depth]);
+  // The literal threshold boundary anchors the elevated tonal envelopes.
+  ctx.beginPath();
+  for (const [x1, y1, x2, y2] of features?.contours ?? []) {
+    ctx.moveTo(...project([x1,y1])); ctx.lineTo(...project([x2,y2]));
+  }
+  ctx.strokeStyle = '#78827d'; ctx.lineWidth = mobile ? 1.4 : .9; ctx.stroke();
+  const boundaryLabel = project([.06,1.06]);
+  text(ctx, ja ? '入力の影 / 境界線' : 'INPUT SHADOW / BOUNDARY', boundaryLabel[0], boundaryLabel[1]+font, font-1, '#89958d');
+
+  // One real analyzer envelope per layer. Small edge echoes convey spatial
+  // spread or paired tones schematically, without inventing additional layers.
+  const strongest = Math.max(.00001, ...model.layers.map(l => l.gain));
+  const active = model.layers.filter(l => l.polygon.length > 2 && l.density > 0);
+  for (const layer of active) {
+    const weight = Math.sqrt(clamp(layer.gain / strongest));
+    const height = layer.height;
+    const points = layer.polygon.map(p => project(p, height));
+    const alpha = .18 + weight * .60;
+    path(ctx, points);
+    const wash = ctx.createLinearGradient(0, baseY-rise, 0, baseY);
+    wash.addColorStop(0, `rgba(202,215,215,${.010 + weight*.018})`);
+    wash.addColorStop(1, 'rgba(178,194,190,.003)');
+    ctx.fillStyle = wash; ctx.fill();
+
+    if (kind === 'texture') {
+      const center = points.reduce((a,p) => [a[0]+p[0]/points.length,a[1]+p[1]/points.length], [0,0]);
+      for (let echo = 1; echo <= 5; echo++) {
+        const scale = 1 + echo * (.009 + layer.spread * .014);
+        path(ctx, points.map(p => [center[0]+(p[0]-center[0])*scale,center[1]+(p[1]-center[1])*scale]));
+        ctx.strokeStyle = `rgba(208,219,214,${alpha*(.12-echo*.014)})`;
+        ctx.lineWidth = 1; ctx.stroke();
       }
-      const visualAlpha = alpha * (strand === 2 ? .77 : .29);
-      ctx.beginPath(); ctx.moveTo(strandPoints[0][0],strandPoints[0][1]);
-      for (let k = 1; k < strandPoints.length; k++) ctx.lineTo(strandPoints[k][0],strandPoints[k][1]);
-      ctx.strokeStyle = `rgba(${rgb.join(',')},${visualAlpha})`;
-      ctx.lineWidth = strand === 2 ? .95 : .56; ctx.stroke();
-      // Bright near-facing sections make the folded surface legible while
-      // far-facing strands recede. Copper is limited to selected inflections.
+    }
+    if (kind === 'interference') {
+      const gap = 2.0 + Math.min(8, layer.separation) * .48;
+      for (const offset of [-gap/2, gap/2]) {
+        path(ctx, layer.polygon.map(p => project(p, height, offset)));
+        ctx.strokeStyle = `rgba(${offset < 0 ? '232,232,218' : '151,174,185'},${alpha*.83})`;
+        ctx.lineWidth = mobile ? 1.4 : .85; ctx.stroke();
+      }
+    } else {
+      path(ctx, points);
+      ctx.strokeStyle = `rgba(218,228,223,${alpha})`;
+      ctx.lineWidth = mobile ? 1.5 : .85; ctx.stroke();
+      // A restrained highlight on the near edge makes the stack read in depth.
       ctx.beginPath();
-      let drawing = false;
-      for (const point of strandPoints) {
-        if (point[2] > .10) {
-          if (drawing) ctx.lineTo(point[0],point[1]);
-          else ctx.moveTo(point[0],point[1]);
-          drawing = true;
-        } else drawing = false;
+      for (let i=0; i<points.length; i++) {
+        const next = (i+1) % points.length;
+        if (layer.polygon[i][1] < .5 && layer.polygon[next][1] < .5) continue;
+        ctx.moveTo(...points[i]); ctx.lineTo(...points[next]);
       }
-      const highlight = colored ? [221,182,146] : [250,250,241];
-      ctx.strokeStyle = `rgba(${highlight.join(',')},${alpha*(strand===2?.52:.24)})`;
-      ctx.lineWidth = strand === 2 ? 1.12 : .62; ctx.stroke();
-      if (strand === 2) points = strandPoints;
+      ctx.strokeStyle = `rgba(243,239,222,${alpha*.40})`; ctx.lineWidth = 1.1; ctx.stroke();
     }
-    // A single narrow stream links the analysis rail, sculptural contour, and
-    // output rail; no all-to-all neural-network metaphor is used.
-    const start = points[0], exit = points[Math.floor(segments/2)];
-    ctx.beginPath(); ctx.moveTo(nodeX, inputY);
-    ctx.bezierCurveTo(300, inputY, 325, start[1], start[0], start[1]);
-    ctx.strokeStyle = `rgba(${rgb.join(',')},${alpha * .30})`; ctx.lineWidth = .6; ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(exit[0],exit[1]);
-    ctx.bezierCurveTo(1175, exit[1], 1205, outputY, 1329, outputY);
-    ctx.strokeStyle = `rgba(${rgb.join(',')},${alpha * .22})`; ctx.lineWidth = .6; ctx.stroke();
-    text(ctx, String(layerIndex+1).padStart(2, '0'), 42, inputY+3, '#929b9b', 10);
-    line(ctx, 72, inputY, 72+71*signal, inputY, `rgba(209,215,210,${.25+signal*.48})`, .8);
-    line(ctx, 72+71*signal, inputY, 158, inputY, '#272d2e', .5);
-    ctx.fillStyle = hasData ? `rgba(222,215,200,${.35+signal*.65})` : '#3d4243';
-    ctx.beginPath(); ctx.arc(nodeX, inputY, 1.3, 0, TAU); ctx.fill();
   }
 
-  const coreValue = hasData ? `${Math.round(area*100).toString().padStart(2,'0')}%` : '—';
-  text(ctx, 'SHADOW AREA', 750, 567, '#929a9a', 9, 'center');
-  text(ctx, coreValue, 750, 590, '#c3c6bf', 17, 'center');
-  text(ctx, hasData ? (frozen ? 'SAMPLE HELD' : 'FOLLOWING INPUT') : 'AWAITING ANALYSIS', 36, 607, '#b4c0b9', 10);
-  text(ctx, `${String(waveform).toUpperCase()} / ${String(kind).toUpperCase()}`, 750, 621, '#8d9797', 9, 'center');
-  text(ctx, 'INTERPRETIVE VISUALIZATION', 1464, 607, '#8d9797', 9, 'right');
-  ctx.restore();
+  // A slim elevation ruler names the mapping, replacing fictitious I/O wires.
+  const axisX = x + w * .055;
+  line(ctx, axisX, baseY, axisX, baseY-rise, '#424a4b');
+  for (const [height, label] of [[0,hz(model.lo)], [.5,hz(Math.sqrt(model.lo*model.hi))], [1,hz(model.hi)]]) {
+    const py = baseY-height*rise;
+    line(ctx, axisX-3, py, axisX+5, py, '#737c7b');
+    text(ctx, label, axisX+12, py+4, font-1, '#9aaba6');
+  }
+  text(ctx, 'Hz', axisX, baseY-rise-18, font-1, '#9aaba6');
+  text(ctx, ja ? '階調の包絡線' : 'TONAL ENVELOPES', x+20, y+27, font, ink);
+  text(ctx, ja ? '影の形を保ち、周波数に沿って積層' : 'SHADOW GEOMETRY / FREQUENCY ELEVATION', x+20, y+50, font-2);
+  if (!active.length) text(ctx, ja ? '影の入力を待機' : 'WAITING FOR SHADOW', cx, y+h*.44, font+1, muted, 'center');
+}
+
+function drawScore(ctx, model, kind, waveform, box, mobile, ja) {
+  const { x, y, w, h } = box;
+  const font = mobile ? 19 : 12;
+  const left = x + (mobile ? 48 : 28), right = x+w-15;
+  const top = y+108, bottom = y+h-62;
+  const px = f => left + model.position(f)*(right-left);
+  text(ctx, ja ? '音への対応' : 'LISTENING MAP', x, y+27, font, ink);
+  const subtitles = {
+    sustain: waveform==='noise' ? (ja?'連続した帯域中心':'CONTINUOUS BAND CENTERS') : (ja?'連続した音高':'CONTINUOUS PITCH'),
+    harmonic: ja ? '基音の整数倍への配置' : 'HARMONIC RELATIONSHIPS',
+    texture: waveform==='noise' ? (ja?'帯域中心と空間的な広がり':'BAND CENTERS & SPATIAL DIFFUSION') : (ja?'音高と空間的な広がり':'PITCH & SPATIAL DIFFUSION'),
+    interference: ja ? '近接する2つの周波数' : 'PAIRS OF NEARBY FREQUENCIES',
+  };
+  text(ctx, subtitles[kind] ?? subtitles.sustain, x, y+50, font-2);
+  for (const value of [model.lo,Math.sqrt(model.lo*model.hi),model.hi]) {
+    const xp = px(value);
+    line(ctx,xp,top-16,xp,bottom+9,'#242c2e');
+    text(ctx,hz(value),xp,top-28,font-1,'#909c99',value===model.lo?'left':value===model.hi?'right':'center');
+  }
+  const max = Math.max(.00001,...model.layers.map(l=>l.gain));
+  for (let i=0;i<model.layers.length;i++) {
+    const layer=model.layers[i], row=bottom-i/Math.max(1,model.layers.length-1)*(bottom-top);
+    const xp=px(layer.frequency), strength=Math.sqrt(clamp(layer.gain/max));
+    const alpha=layer.density>0 ? .25+strength*.65 : .10;
+    // The rows preserve the identity of the 16/30 measured tone bins.
+    line(ctx,left,row,right,row,'rgba(157,174,170,.045)');
+    if (i===0 || i===model.layers.length-1 || (i+1)%5===0)
+      text(ctx,String(layer.id).padStart(2,'0'),left-14,row+4,font-2,'#697673','right');
+    if (layer.density<=0) continue;
+    if (kind==='texture') {
+      // Vertical softness encodes spatial spread, not spectral bandwidth.
+      const halo=ctx.createRadialGradient(xp,row,0,xp,row,4+layer.spread*9);
+      halo.addColorStop(0,`rgba(210,221,216,${alpha*.4})`); halo.addColorStop(1,'rgba(210,221,216,0)');
+      ctx.fillStyle=halo; ctx.fillRect(xp-14,row-14,28,28);
+    }
+    if (kind==='interference') {
+      const a=px(layer.pair[0]),b=px(layer.pair[1]);
+      line(ctx,a,row,b,row,`rgba(210,224,219,${alpha})`,1);
+      dot(ctx,a,row,1.9,`rgba(235,231,216,${alpha})`);
+      dot(ctx,b,row,1.9,`rgba(148,177,192,${alpha})`);
+    } else {
+      line(ctx,xp,row-2-strength*1.5,xp,row+2+strength*1.5,`rgba(229,235,227,${alpha})`,mobile?2:1.4);
+    }
+    if (kind==='harmonic' && layer.partial && (i===0 || i===model.layers.length-1 || (i+1)%5===0))
+      text(ctx,`×${layer.partial}`,Math.min(right-24,xp+9),row+4,font-3,'#a8b4aa');
+  }
+  text(ctx,ja?'基音 / 帯域中心 · Hz':'FUNDAMENTAL / BAND CENTER · Hz',x,y+h-19,font-2,'#929d98');
+  const explanation={
+    sustain:ja?'線の強さ：各階調の音量':'Line strength: mapped layer level',
+    harmonic:ja?'同じ周波数を共有する階調は縦に整列':'Layers align at shared frequencies',
+    texture:ja?'にじみ：空間的な広がりの模式表示':'Softness: schematic spatial spread',
+    interference:ja?'積層の二重線は間隔を拡大して表示':'Envelope pairs: separation enlarged',
+  };
+  text(ctx,explanation[kind]??explanation.sustain,x,y+h+9,font-2,'#788783');
+}
+
+export function renderSignalField(canvas, {features=null,sources=[],settings={},language='en',frozen=false,running=true}={}) {
+  if (!canvas?.getContext) return;
+  const ctx=canvas.getContext('2d'); if(!ctx)return;
+  const cssWidth=canvas.clientWidth || 1500;
+  const mobile=cssWidth<650;
+  const width=mobile?720:1500, height=mobile?1080:680;
+  const ratio=Math.min(2,globalThis.devicePixelRatio || 1);
+  const bufferWidth=Math.round(cssWidth*ratio),bufferHeight=Math.round(bufferWidth*height/width);
+  if(canvas.width!==bufferWidth || canvas.height!==bufferHeight){canvas.width=bufferWidth;canvas.height=bufferHeight;}
+  ctx.setTransform(canvas.width/width,0,0,canvas.height/height,0,0);
+  ctx.clearRect(0,0,width,height);ctx.fillStyle='#070809';ctx.fillRect(0,0,width,height);
+  const model=buildFieldStudy(features,sources,settings);
+  const kind=settings.organization || 'sustain',ja=language==='ja',font=mobile?19:12;
+  if(mobile){
+    drawStrata(ctx,model,features,kind,{x:0,y:8,w:720,h:610},true,ja);
+    line(ctx,24,636,696,636,'#303839');
+    drawScore(ctx,model,kind,settings.waveform,{x:30,y:661,w:650,h:300},true,ja);
+  }else{
+    drawStrata(ctx,model,features,kind,{x:0,y:12,w:1000,h:605},false,ja);
+    line(ctx,1018,40,1018,564,'#303839');
+    drawScore(ctx,model,kind,settings.waveform,{x:1060,y:12,w:404,h:545},false,ja);
+  }
+  const y=height-32;
+  const state=frozen?(ja?'固定した影':'SAMPLE HELD'):running?(ja?'入力に追従':'FOLLOWING INPUT'):(ja?'停止中':'STOPPED');
+  text(ctx,state, mobile?30:20,y,font-1,'#acb8b1');
+  const area=features?`${(features.area*100).toFixed(1)}%`:'—';
+  text(ctx,`${ja?'影の面積':'SHADOW AREA'} ${area}`,width/2,y,font-1,'#acb8b1','center');
+  text(ctx,model.comparison?(ja?'比較音あり':'COMPARISON VOICE ON'):(ja?'音への変換を可視化':'MAPPING STUDY'),width-(mobile?30:36),y,font-2,muted,'right');
 }

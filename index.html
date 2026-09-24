@@ -16,7 +16,7 @@
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="De-symmetrical Core · Shadow Lab" />
     <meta name="twitter:description" content="An interactive study of shadow, sound and space. Explore four listening chapters and a 3D installation model." />
-    <link rel="stylesheet" href="./style.css?v=spatial-study-1" />
+    <link rel="stylesheet" href="./style.css?v=shadow-strata-1" />
   </head>
   <body>
     <header>
@@ -57,7 +57,12 @@
       <div id="notice" role="status" data-en="Analysis starts with a test signal. Select “Connect camera” to measure a real shadow, or “Start audio” to listen.">
         テスト信号で解析を開始します。実物の影を測るには「カメラを接続」を押してください。音を聴くには「ブラウザで試聴」。
       </div>
-      <section class="signal-stage"><div class="stage-heading"><span>LIVE SONIFICATION / CORE STUDY</span><span id="stage-mode">I / CONTINUUM</span></div><canvas id="signal-field" width="1500" height="650" aria-label="影の階調と音組織を示すリアルタイム表示" data-en-aria-label="Live visualization of shadow tone and sound organization"></canvas><div class="stage-footer"><span id="stage-readout">30 TONE LAYERS</span><span>SHADOW → ORGANIZATION → SPACE</span></div></section>
+      <section class="signal-stage" aria-label="影の階調と音への変換" data-en-aria-label="Shadow layers and their sound mapping">
+        <div class="stage-heading"><span>LIVE SONIFICATION / CORE STUDY</span><span id="stage-mode">I / Sustain</span></div>
+        <canvas id="signal-field" width="1500" height="680" aria-label="影の境界線、階調の包絡線の積層、各階調の周波数への対応図" data-en-aria-label="Shadow boundary, stacked tonal envelopes, and a map of each layer’s frequency" aria-describedby="field-note"></canvas>
+        <div class="stage-footer"><span id="stage-readout">30 TONE LAYERS</span><span data-en="ONE SHADOW / FOUR WAYS OF LISTENING">ひとつの影 / 4つの聴き方</span></div>
+        <p id="field-note" data-en="The shadow’s tonal envelopes rise with their mapped frequencies. Select a chapter below to explore a different organization of the same shadow.">影の階調の包絡線を、対応する周波数に沿って積層しています。下のチャプターを選ぶと、同じ影から異なる音の組織を試せます。</p>
+      </section>
       <section class="chapter-lab" aria-label="4章の音組織" data-en-aria-label="Four chapters of sound organization">
         <div class="chapter-heading"><div><span class="eyebrow">DE-SYMMETRICAL CORE · v22 STUDY</span><h2 data-en="One shadow. Different ways of listening.">同じ影から、異なる音の経験へ。</h2><p data-en="An experimental study in four chapters. You can select a chapter using the tabs below to compare how sound materials, temporal structures and frequency ranges change the listening experience.">4章構成の実験案。下のチャプタータブから章を選び、音素材・時間構造・周波数帯による聴こえ方の違いを比較できます。</p></div><span class="core-spec"><span data-en="30 layers + 1 comparison layer">30層 + 比較1層</span><br><span data-en="16 wall + 1 arm + Sub">壁16 + アーム1 + Sub</span></span></div>
         <div id="chapter-cards" class="chapter-cards" role="group" aria-label="章の選択" data-en-aria-label="Choose a chapter"></div>
@@ -332,6 +337,6 @@
       <span>KEIGO YOSHIDA · DE-SYMMETRICAL CORE</span><span data-en="OBSERVATION / COMPARISON / SOUND">観測 / 比較 / 音響</span>
     </footer>
     <video id="video" playsinline muted hidden></video><input id="file" type="file" accept="image/*,video/*" hidden />
-    <script type="module" src="./app.js?v=menu-options-2"></script>
+    <script type="module" src="./app.js?v=shadow-strata-1"></script>
   </body>
 </html>

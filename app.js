@@ -9,7 +9,7 @@ import {
 } from "./analysis.js";
 import { ShadowAudio } from "./audio.js?v=mobile-audio-1";
 import { CHAPTERS, getChapter, normalizeSoundSettings, applyChapter } from "./chapters.js";
-import { renderSignalField } from "./field-visual.js";
+import { renderSignalField } from "./field-visual.js?v=shadow-strata-1";
 import { createCoreSpeakers } from "./core-layout.js";
 import { migrateStudy } from "./study-state.js";
 import { tr as t, getLanguage, onLanguageChange } from "./i18n.js";
@@ -1402,7 +1402,21 @@ onLanguageChange(() => {
   if ($("comparison").value === "none") renderComparisonPlaceholder();
 });
 requestAnimationFrame(tick);
-function animateField(t){requestAnimationFrame(animateField);if(document.hidden || t-lastVisual<33)return;lastVisual=t;renderSignalField($("signal-field"),{features,sources,chapter:soundSettings().organization,waveform:$("waveform").value,time:running?t/1000:0,frozen:!!frozenStudy});}
+function animateField(t) {
+  requestAnimationFrame(animateField);
+  if (document.hidden || t - lastVisual < 85) return;
+  lastVisual = t;
+  const settings = soundSettings();
+  // When stopped, chapter edits still show the proposed mapping of the held
+  // analysis; this does not start audio or alter the acquired shadow.
+  const displaySources = !running && features
+    ? applyChapter(toSources(features, options(), comparison), features, settings)
+    : sources;
+  renderSignalField($("signal-field"), {
+    features, sources: displaySources, settings, language: getLanguage(),
+    frozen: !!frozenStudy, running,
+  });
+}
 requestAnimationFrame(animateField);
 initSpatialIntegration(() => ({
   source, running, fixed: !!frozenStudy, sampleId: frozenStudy?.id || currentSourceId,
