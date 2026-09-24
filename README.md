@@ -6,9 +6,11 @@ A browser instrument for comparing four provisional sound organizations from the
 
 ## Listen and compare
 
+The interface opens in English on first visit. Use **JP / EN** beside the title to switch the interface and usage guide between Japanese and English. The preference is saved on this browser. Switching language keeps the current input, sound, chapter settings and fixed analysis sample. Listening and stop controls sit beside the camera and tone-band controls.
+
 1. Choose the test signal, a camera, or an image/video. Camera frames are processed locally.
-2. Click **ブラウザで試聴** to start sound. The waveform choices are **sine (original), band-pass noise, triangle**, in that order.
-3. Click **解析値を固定して比較** to keep the exact same analyzed frame while switching chapters, waveform or frequency range.
+2. Click **ブラウザで試聴 / Start audio** to start sound. The waveform choices are **sine wave, band-limited noise, triangle wave**, in that order.
+3. Click **解析値を固定して比較 / Freeze analysis to compare** to keep the exact same analyzed frame while switching chapters, waveform or frequency range.
 4. Edit each chapter independently. Settings persist locally; export the four settings and current analysis/source data as JSON.
 
 | Provisional chapter | Default material | Organization | Fundamental / center range |

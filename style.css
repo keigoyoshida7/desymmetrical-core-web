@@ -35,6 +35,17 @@ header { padding: 27px 44px 24px; display: flex; justify-content: space-between;
 h1 { font-size: clamp(22px, 2.2vw, 32px); font-weight: 400; letter-spacing: -.06em; margin: 0 0 8px; line-height: 1.1; }
 .identity p { margin: 0; color: var(--muted); font: 9px var(--mono); letter-spacing: .2em; }
 .header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
+.language-switch { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); }
+.language-switch button { padding: 6px 9px; border: 0; background: transparent; color: var(--muted); font: 10px var(--mono); letter-spacing: .06em; }
+.language-switch button[aria-pressed="true"] { background: #2b2c2e; color: var(--ink); }
+.language-switch button:hover { color: #fff; }
+header > .language-switch { margin-right: auto; flex-shrink: 0; }
+.transport-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-left: 14px; border-left: 1px solid var(--line); }
+.transport-controls .status { margin: 0; padding: 7px 0; }
+.transport-controls button { padding: 8px 13px; }
+.transport-controls .primary { font-weight: 500; }
+html[lang="en"] .metrics small { white-space: normal; }
+html[lang="en"] .controls label output { position: static; align-self: flex-end; }
 .status, .tag { font: 10px var(--mono); color: #babbb8; letter-spacing: .08em; padding: 7px 10px; border: 1px solid var(--line); border-radius: 1px; }
 .status { border: 0; margin-right: 10px; }
 .status::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; margin: 0 9px 1px 0; background: var(--accent); }
@@ -181,6 +192,8 @@ output { font-family: var(--mono); }
   .status { padding-left: 0; font-size: 9px; margin-right: auto; }
   main { padding: 18px 19px 35px; }
   .toolbar { gap: 9px; }
+  .transport-controls { width: 100%; padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--line); margin-top: 3px; }
+  .transport-controls .status { margin-right: auto; }
   .toolbar label { flex: 1; min-width: 90px; }
   .toolbar select { min-width: 0; width: 100%; max-width: 190px; font-size: 10px; padding-right: 12px; }
   .toolbar button { font-size: 10px; padding: 8px; }

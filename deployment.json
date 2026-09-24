@@ -3,6 +3,7 @@
   "source": "https://github.com/keigoyoshida7/desymmetrical-adaptation-web",
   "url": "https://keigoyoshida7.github.io/desymmetrical-core-web/",
   "features": [
+    "Japanese / English interface and usage guide",
     "four sustained chapters: sustain, harmonic, texture, interference",
     "three selectable waveforms: sine, noise, triangle",
     "fixed analysis comparison",
