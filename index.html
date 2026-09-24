@@ -9,7 +9,7 @@
       content="影の階調、輪郭、半影を測り、層状の空間音響へ変換する De-symmetrical Core の観測環境。" data-en-content="An observation environment for De-symmetrical Core, measuring shadow tone, contours and penumbra and translating them into layered spatial sound."
     />
     <title>De-symmetrical Core · Shadow Lab</title>
-    <link rel="stylesheet" href="./style.css?v=transport-volume-1" />
+    <link rel="stylesheet" href="./style.css?v=workspace-controls-1" />
   </head>
   <body>
     <header>
@@ -69,6 +69,74 @@
         <p id="chapter-description" class="chapter-description"></p>
         <div class="compare-row"><button id="freeze-analysis" data-en="Freeze analysis to compare">解析値を固定して比較</button><span id="sample-status" role="status" data-en="LIVE · Following input">LIVE · 入力に追従</span><button id="chapter-reset" data-en="Reset this chapter">この章の初期値</button><button id="export-study" data-en="Export all four chapters">4章の設定を書き出す</button></div>
         <p class="study-note" data-en="Freeze analysis to use the same frame across all four chapters. Each chapter’s settings are saved on this device, including its frequency limits. Triangle waves contain harmonics; the selected range applies to the fundamental, or the center frequency for noise. Chapter IV sustains two nearby tones to explore their interference.">「解析値を固定」で同一フレームを4章に使用。各章の変更は端末に保存されます。周波数の上下限は各章で変更できます。三角波は倍音を含み、設定帯域は基音（ノイズは中心周波数）の範囲です。IVは近接する2音を持続させ、音の干渉を聴く章です。</p>
+        <section class="analysis-settings" aria-labelledby="analysis-settings-title">
+          <div class="section-title">
+            <h2 id="analysis-settings-title" data-en="Observation and audio settings">観測と音響の調整</h2>
+            <button id="reset" data-en="Reset to defaults">初期値に戻す</button>
+          </div>
+          <div class="controls">
+            <label
+              ><span data-en="Shadow threshold">影のしきい値</span> <output id="threshold-value">0.12</output><input
+                id="threshold" data-freeze-lock
+                type="range"
+                min="0.02"
+                max="0.8"
+                step="0.01"
+                value="0.12" /></label><label
+              ><span data-en="Tonal gamma">階調ガンマ</span> <output id="gamma-value">1.00</output><input
+                id="gamma" data-freeze-lock
+                type="range"
+                min="0.3"
+                max="3"
+                step="0.05"
+                value="1" /></label><label
+              ><span data-en="Temporal smoothing">時間平滑化</span> <output id="smoothing-value">0.70</output><input
+                id="smoothing"
+                type="range"
+                min="0"
+                max="0.95"
+                step="0.05"
+                value="0.7" /></label><label
+              ><span data-en="Analysis resolution">解析解像度</span><select id="resolution" data-freeze-lock>
+                <option value="160">160 × 100</option>
+                <option value="320" selected>320 × 200</option>
+                <option value="640">640 × 400</option>
+              </select></label>
+            <label
+              ><span data-en="Spatial spread">空間の広がり</span> <output id="spread-value">1.00</output><input
+                id="spread"
+                type="range"
+                min="0"
+                max="2"
+                step="0.05"
+                value="1" /></label><label
+              ><span data-en="Penumbra → Reverb">半影 → 残響</span> <output id="reverb-value">0.50</output><input
+                id="reverb"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value="0.5"
+            /></label>
+            <label
+              ><span data-en="Analysis region (% from center)">解析範囲（中央から %）</span><input
+                id="roi" data-freeze-lock
+                type="range"
+                min="20"
+                max="100"
+                step="5"
+                value="100" /></label><label
+              ><span data-en="Physical width (mm, optional)">横幅の実寸 (mm・任意)</span><input
+                id="physical-width"
+                type="number"
+                min="0"
+                max="100000"
+                value="0"
+                placeholder="0 = ピクセル表示" data-en-placeholder="0 = display in pixels" /></label><label class="check"
+              ><input type="checkbox" id="mirror" data-freeze-lock /><span data-en="Mirror horizontally">左右を反転</span></label><label class="check"
+              ><input type="checkbox" id="speak" /><span data-en="Spoken feedback for operator">運用者向け読み上げ</span></label>
+          </div>
+        </section>
       </section>
       <details class="max-legacy"><summary data-en="Connecting to external Max">外部Maxとの接続について</summary>      <section class="max-monitor" aria-label="Maxの受信・出力確認" data-en-aria-label="Max input and output monitor">
         <div><strong>MAX / SPAT5</strong><span id="max-status" role="status" data-en="Legacy 12.1-channel sine only / Core extensions not supported">従来版12.1ch・sin波専用 / Core拡張は未対応</span></div>
@@ -160,72 +228,6 @@
       </section>
       <section class="lower">
         <div class="settings">
-          <div class="section-title">
-            <h2 data-en="Observation and audio settings">観測と音響の調整</h2>
-            <button id="reset" data-en="Reset to defaults">初期値に戻す</button>
-          </div>
-          <div class="controls">
-            <label
-              ><span data-en="Shadow threshold">影のしきい値</span> <output id="threshold-value">0.12</output><input
-                id="threshold" data-freeze-lock
-                type="range"
-                min="0.02"
-                max="0.8"
-                step="0.01"
-                value="0.12" /></label><label
-              ><span data-en="Tonal gamma">階調ガンマ</span> <output id="gamma-value">1.00</output><input
-                id="gamma" data-freeze-lock
-                type="range"
-                min="0.3"
-                max="3"
-                step="0.05"
-                value="1" /></label><label
-              ><span data-en="Temporal smoothing">時間平滑化</span> <output id="smoothing-value">0.70</output><input
-                id="smoothing"
-                type="range"
-                min="0"
-                max="0.95"
-                step="0.05"
-                value="0.7" /></label><label
-              ><span data-en="Analysis resolution">解析解像度</span><select id="resolution" data-freeze-lock>
-                <option value="160">160 × 100</option>
-                <option value="320" selected>320 × 200</option>
-                <option value="640">640 × 400</option>
-              </select></label>
-            <label
-              ><span data-en="Spatial spread">空間の広がり</span> <output id="spread-value">1.00</output><input
-                id="spread"
-                type="range"
-                min="0"
-                max="2"
-                step="0.05"
-                value="1" /></label><label
-              ><span data-en="Penumbra → Reverb">半影 → 残響</span> <output id="reverb-value">0.50</output><input
-                id="reverb"
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value="0.5"
-            /></label>
-            <label
-              ><span data-en="Analysis region (% from center)">解析範囲（中央から %）</span><input
-                id="roi" data-freeze-lock
-                type="range"
-                min="20"
-                max="100"
-                step="5"
-                value="100" /></label><label
-              ><span data-en="Physical width (mm, optional)">横幅の実寸 (mm・任意)</span><input
-                id="physical-width"
-                type="number"
-                min="0"
-                max="100000"
-                value="0"
-                placeholder="0 = ピクセル表示" data-en-placeholder="0 = display in pixels" /></label><label class="check"
-              ><input type="checkbox" id="mirror" data-freeze-lock /><span data-en="Mirror horizontally">左右を反転</span></label><label class="check"
-              ><input type="checkbox" id="speak" /><span data-en="Spoken feedback for operator">運用者向け読み上げ</span></label>
-          </div>
           <details>
             <summary data-en="Comparison and external connections">比較・外部接続</summary>
             <div class="controls">
