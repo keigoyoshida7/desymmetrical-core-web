@@ -40,6 +40,8 @@ The original [Max package](https://keigoyoshida7.github.io/desymmetrical-adaptat
 
 ## Develop
 
+The appended **Spatial study** adds the reference Core installation editor in the same black/silver style, including room/sculpture/arm/light geometry, motion studies, sources, Spat mapping, presets and automation. It follows JP/EN and can optionally follow numerical shadow features from the analysis above. Scene controls remain independent of browser audio. See [spatial-study/README.md](spatial-study/README.md) for provenance, mapping conventions, OSC scope and rebuilding the committed `spatial/` bundle.
+
 Requires Node.js 18 or later. No runtime dependencies or build step.
 
 ```sh

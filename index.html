@@ -9,7 +9,7 @@
       content="影の階調、輪郭、半影を測り、層状の空間音響へ変換する De-symmetrical Core の観測環境。" data-en-content="An observation environment for De-symmetrical Core, measuring shadow tone, contours and penumbra and translating them into layered spatial sound."
     />
     <title>De-symmetrical Core · Shadow Lab</title>
-    <link rel="stylesheet" href="./style.css?v=workspace-controls-1" />
+    <link rel="stylesheet" href="./style.css?v=spatial-study-1" />
   </head>
   <body>
     <header>
@@ -311,6 +311,18 @@
             >時刻と解析値だけを端末内に保存。カメラ画像は記録しません。</small>
         </aside>
       </section>
+      <section id="spatial-study" class="spatial-study" aria-labelledby="spatial-study-title">
+        <div class="spatial-study-heading">
+          <div><span class="eyebrow">3D INSTALLATION / SPATIAL STUDY</span>
+            <h2 id="spatial-study-title" data-en="Light, matter and sound in space.">空間の中の、光・物質・音。</h2>
+            <p data-en="Explore the room, acrylic form, stone, suspended arm, light movement and spatial sound sources. Edit a scene, compare mappings, and save or replay your studies.">会場、アクリル、石、吊り下げアーム、光の動き、空間音源を検討します。シーンの編集、マッピングの比較、設定の保存や動作の記録・再生ができます。</p>
+          </div>
+          <a href="https://keigoyoshida7.github.io/desymmetrical-core/" target="_blank" rel="noopener noreferrer" data-en="Reference study ↗">参照スタディ ↗</a>
+        </div>
+        <p class="spatial-study-note" data-en="A provisional 3D planning model. Its geometry and Spat controls are separate from the browser audio above. Enable “Use analysis from above” to explore the current shadow features in this scene.">仮寸法による3D検討モデルです。形状やSpatの操作は、上部のブラウザ音響とは独立しています。「上の解析値を使う」を有効にすると、現在の影の解析値をこのシーンで試せます。</p>
+        <div class="spatial-loading" data-en="Preparing the spatial study…">空間スタディを準備しています…</div>
+        <iframe id="spatial-study-frame" title="空間スタディ：会場・アーム・光・音源の3D編集" data-en-title="Spatial study: interactive room, arm, light and sound-source editor" aria-busy="true"></iframe>
+      </section>
     </main>
     <footer>
       <span>KEIGO YOSHIDA · DE-SYMMETRICAL CORE</span><span data-en="OBSERVATION / COMPARISON / SOUND">観測 / 比較 / 音響</span>
@@ -321,6 +333,6 @@
       accept="image/*"
       hidden
     />
-    <script type="module" src="./app.js?v=jp-en-1"></script>
+    <script type="module" src="./app.js?v=spatial-study-1"></script>
   </body>
 </html>

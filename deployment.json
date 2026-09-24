@@ -8,6 +8,8 @@
     "three selectable waveforms: sine, noise, triangle",
     "fixed analysis comparison",
     "30+1 layers",
-    "17.1 browser output"
+    "17.1 browser output",
+    "embedded 3D spatial study with room, light, motion, sources and presets",
+    "optional one-way shadow feature mapping into the spatial scene"
   ]
 }

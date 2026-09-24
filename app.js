@@ -13,6 +13,7 @@ import { renderSignalField } from "./field-visual.js";
 import { createCoreSpeakers } from "./core-layout.js";
 import { migrateStudy } from "./study-state.js";
 import { tr as t, getLanguage, onLanguageChange } from "./i18n.js";
+import { initSpatialIntegration } from "./spatial-integration.js";
 const $ = (id) => document.getElementById(id),
   canvases = ["live", "analysis", "generated", "spatial"].map($),
   contexts = canvases.map((c) =>
@@ -1412,6 +1413,10 @@ onLanguageChange(() => {
 requestAnimationFrame(tick);
 function animateField(t){requestAnimationFrame(animateField);if(document.hidden || t-lastVisual<33)return;lastVisual=t;renderSignalField($("signal-field"),{features,sources,chapter:soundSettings().organization,waveform:$("waveform").value,time:running?t/1000:0,frozen:!!frozenStudy});}
 requestAnimationFrame(animateField);
+initSpatialIntegration(() => ({
+  source, running, fixed: !!frozenStudy, sampleId: frozenStudy?.id || currentSourceId,
+  features: features ? summarize(features) : null,
+}));
 export function getStatus() {
   return {
     source,
