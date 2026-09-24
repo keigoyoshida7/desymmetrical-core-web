@@ -8,6 +8,9 @@ import {
   clamp,
 } from "./analysis.js";
 import { ShadowAudio } from "./audio.js";
+import { CHAPTERS, getChapter, normalizeSoundSettings, applyChapter } from "./chapters.js";
+import { renderSignalField } from "./field-visual.js";
+import { createCoreSpeakers } from "./core-layout.js";
 const $ = (id) => document.getElementById(id),
   canvases = ["live", "analysis", "generated", "spatial"].map($),
   contexts = canvases.map((c) =>
@@ -44,48 +47,86 @@ let stream = null,
   lastSourceTime = -1,
   db = null,
   records = [];
-const speakers = [
-  [-1.2, -1.3, 0.319],
-  [1.2, -1.3, 0.319],
-  [-1.2, -1.3, 0.715],
-  [1.2, -1.3, 0.715],
-  [-1.2, 0.65, 0.319],
-  [1.2, 0.65, 0.319],
-  [-1.2, 0.65, 0.715],
-  [1.2, 0.65, 0.715],
-  [-1.2, -1.3, 1.65],
-  [1.2, -1.3, 1.65],
-  [-1.2, 1.3, 1.65],
-  [1.2, 1.3, 1.65],
-  [0, -1.3, 0.319],
-].map((v, i) => ({
-  id: i + 1,
-  group: i < 4 ? "前面" : i < 8 ? "間仕切り" : i < 12 ? "天井" : "Sub",
-  x: v[0],
-  y: v[1],
-  z: v[2],
-  gainDb: 0,
-  delayMs: 0,
-  polarity: 1,
-  eq: [],
-  measured: false,
-}));
+const speakers = createCoreSpeakers();
+let chapterId = "sustain", chapterSettings = {}, frozenStudy = null, currentSourceId = "", lastVisual = 0;
+const WAVE_LABELS = {sine:"sin波（従来版）",square:"矩形波",sawtooth:"ノコギリ波",triangle:"三角波",noise:"帯域ノイズ"};
+try {
+  const saved = JSON.parse(localStorage.getItem("desymmetrical-core-study-v1") || "null");
+  if (saved) { chapterId = getChapter(saved.chapterId).id; chapterSettings = saved.settings || {}; }
+} catch {}
+function soundSettings() {
+  return normalizeSoundSettings({chapter: chapterId, waveform:$("waveform").value, organization:$("organization").value,
+    frequencyMin:Number($("frequency-min").value), frequencyMax:Number($("frequency-max").value),
+    pulseRate:Number($("pulse-rate").value), harmonicFundamental:Number($("harmonic-fundamental").value),
+    pulseWidth: chapterSettings[chapterId]?.pulseWidth ?? getChapter(chapterId).pulseWidth});
+}
+function saveSound() {
+  chapterSettings[chapterId] = soundSettings();
+  try { localStorage.setItem("desymmetrical-core-study-v1", JSON.stringify({chapterId,settings:chapterSettings})); } catch {}
+}
+function updateSoundUI() {
+  const settings = soundSettings(), chapter = getChapter(chapterId);
+  $("current-wave").textContent = WAVE_LABELS[settings.waveform];
+  $("pulse-rate").disabled = settings.organization !== "pulse";
+  $("harmonic-fundamental").disabled = settings.organization !== "harmonic";
+  $("chapter-description").textContent = getChapter(settings.organization).mapping + " / 現在: " + WAVE_LABELS[settings.waveform] + " · " + settings.frequencyMin + "–" + settings.frequencyMax + " Hz";
+  $("stage-mode").textContent = `${chapter.number} / ${chapter.title}`;
+  $("stage-readout").textContent = `${$("bands").value} TONE LAYERS · ${WAVE_LABELS[settings.waveform]} · ${settings.organization.toUpperCase()}`;
+  document.querySelectorAll("[data-chapter]").forEach(b => {
+    const selected=b.dataset.chapter===chapterId;
+    b.setAttribute("aria-pressed",String(selected));
+    const config=selected?settings:normalizeSoundSettings(chapterSettings[b.dataset.chapter]||getChapter(b.dataset.chapter));
+    const lines=b.querySelectorAll("small");
+    lines[0].textContent=`${WAVE_LABELS[config.waveform]} · ${config.frequencyMin}–${config.frequencyMax} Hz`;
+    lines[1].textContent=getChapter(config.organization).organizationLabel;
+  });
+  const ctx = $("wave-preview").getContext("2d");
+  ctx.clearRect(0,0,240,70); ctx.strokeStyle="#d4d2cc";ctx.lineWidth=1.5;ctx.beginPath();
+  for (let x=0;x<240;x++) { const phase=(x/80)%1; const v=settings.waveform==="sine"?Math.sin(phase*Math.PI*2):settings.waveform==="square"?(phase<.5?1:-1):settings.waveform==="sawtooth"?phase*2-1:settings.waveform==="triangle"?1-4*Math.abs(phase-.5):Math.sin(x*4.91)*Math.sin(x*.83); const y=35-v*22; x?ctx.lineTo(x,y):ctx.moveTo(x,y); }ctx.stroke();
+}
+function selectChapter(id, reset=false) {
+  chapterId = getChapter(id).id;
+  const settings = normalizeSoundSettings(reset ? getChapter(id) : {...getChapter(id),...chapterSettings[id], chapter:id});
+  for (const [key,control] of Object.entries({waveform:"waveform",organization:"organization",frequencyMin:"frequency-min",frequencyMax:"frequency-max",pulseRate:"pulse-rate",harmonicFundamental:"harmonic-fundamental"})) $(control).value=settings[key];
+  chapterSettings[id] = settings; previousSources=[]; updateSoundUI(); saveSound();
+}
+for (const chapter of CHAPTERS) {
+  const b=document.createElement("button"); b.className="chapter-card"; b.dataset.chapter=chapter.id;
+  b.innerHTML=`<span class="chapter-num">CHAPTER ${chapter.number}</span><b>${chapter.title}</b><small>${chapter.material} · ${chapter.frequencyMin}–${chapter.frequencyMax} Hz</small><small>${chapter.organizationLabel}</small>`;
+  b.onclick=()=>{saveSound();selectChapter(chapter.id);};$("chapter-cards").append(b);
+}
+function releaseStudy() {
+  frozenStudy=null; $("freeze-analysis").textContent="解析値を固定して比較";$("sample-status").textContent="LIVE · 入力に追従";
+  for (const el of document.querySelectorAll("[data-freeze-lock]")) el.disabled=false;
+  lastSourceTime=-1;
+}
+$("freeze-analysis").onclick=()=>{
+  if(frozenStudy){releaseStudy();return;}
+  if(!features){notice("解析値が届いてから固定してください。",true);return;}
+  frozenStudy={features:structuredClone(features),comparison:comparison?.valid?structuredClone(comparison):null,id:currentSourceId,at:new Date().toISOString()};
+  generationEpoch++;generationAbort?.abort();
+  $("freeze-analysis").textContent="ライブ入力に戻す";$("sample-status").textContent=`FIXED · ${frozenStudy.id}`;
+  for(const el of document.querySelectorAll("[data-freeze-lock]"))el.disabled=true;
+};
+$("chapter-reset").onclick=()=>selectChapter(chapterId,true);
+for(const id of ["waveform","organization","pulse-rate","harmonic-fundamental"]) $(id).onchange=()=>{const s=soundSettings();$("pulse-rate").value=s.pulseRate;$("harmonic-fundamental").value=s.harmonicFundamental;updateSoundUI();saveSound();};
+$("export-study").onclick=()=>{saveSound();download("de-symmetrical-core-study.json",JSON.stringify({version:2,chapter:chapterId,chapters:Object.fromEntries(CHAPTERS.map(c=>[c.id,chapterSettings[c.id]||normalizeSoundSettings(c)])),sampleId:frozenStudy?.id||currentSourceId,fixed:!!frozenStudy,analysis:features?summarize(features):null,sources,speakers},null,2));};
 function options() {
   return {
+    ...soundSettings(),
     bands: Number($("bands").value),
     threshold: Number($("threshold").value),
     gamma: Number($("gamma").value),
     roi: Number($("roi").value) / 100,
     background,
-    frequencyMin: Number($("frequency-min").value),
-    frequencyMax: Number($("frequency-max").value),
+
     spread: Number($("spread").value),
     reverb: Number($("reverb").value),
   };
 }
 function notice(text, error = false) {
   $("notice").textContent = text;
-  $("notice").style.color = error ? "#ffb7b7" : "#bdb9cd";
+  $("notice").style.color = error ? "#ffb7b7" : "#bdbeb8";
 }
 function resetComparison() {
   generationEpoch++;
@@ -98,6 +139,7 @@ function resetComparison() {
     $("comparison").value === "none" ? "比較像は未接続" : "比較を準備中";
 }
 function resetAnalysis() {
+  releaseStudy();
   background = null;
   backgroundId = null;
   previousSources = [];
@@ -273,23 +315,22 @@ function renderAnalysis(f) {
       b = f.quantized[i] / (f.bands - 1);
     if (view === "penumbra") {
       const v = f.penumbra[i] ? clamp(f.gradients[i] * 15) : 0;
-      out[j] = 35 + v * 133;
-      out[j + 1] = 30 + v * 115;
-      out[j + 2] = 45 + v * 210;
+      out[j] = 16 + v * 218;
+      out[j + 1] = 16 + v * 198;
+      out[j + 2] = 16 + v * 176;
     } else if (view === "contour") {
       const v = f.mask[i] ? 42 : 20;
       out[j] = v;
       out[j + 1] = v;
-      out[j + 2] = v + 6;
+      out[j + 2] = v;
     } else {
-      out[j] = f.mask[i] ? Math.round(36 + b * 150) : 20;
-      out[j + 1] = f.mask[i] ? Math.round(30 + b * 133) : 20;
-      out[j + 2] = f.mask[i] ? Math.round(57 + b * 185) : 27;
+      const tone = f.mask[i] ? Math.round(40 + b * 180) : 12;
+      out[j] = tone; out[j + 1] = tone; out[j + 2] = tone;
     }
     out[j + 3] = 255;
   }
   showFrame(ctx, out, f.width, f.height);
-  ctx.strokeStyle = "#c6b5ff";
+  ctx.strokeStyle = "#d1ccc3";
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (const p of f.contours) {
@@ -302,13 +343,13 @@ function renderAnalysis(f) {
     for (let i = 0; i < f.bands; i += stride) {
       const poly = f.layers[i].cell.polygon;
       if (poly.length) {
-        ctx.strokeStyle = "rgba(207,197,246,.24)";
+        ctx.strokeStyle = "rgba(207,208,204,.24)";
         path(ctx, poly, (p) => [p[0] * 640, p[1] * 400]);
         ctx.stroke();
       }
     }
   const [x, y] = f.centroid;
-  ctx.strokeStyle = "#f2ebff";
+  ctx.strokeStyle = "#edeee9";
   ctx.beginPath();
   ctx.moveTo(x * 640 - 7, y * 400);
   ctx.lineTo(x * 640 + 7, y * 400);
@@ -316,7 +357,7 @@ function renderAnalysis(f) {
   ctx.lineTo(x * 640, y * 400 + 7);
   ctx.stroke();
   const max = Math.max(1, ...f.histogram);
-  ctx.fillStyle = "#a895ff";
+  ctx.fillStyle = "#bfc1be";
   for (let i = 0; i < f.bands; i++) {
     const bh = (35 * f.histogram[i]) / max;
     ctx.fillRect(
@@ -340,7 +381,7 @@ function renderSpatial(f) {
   const ctx = contexts[3];
   ctx.clearRect(0, 0, 640, 400);
   const project = (x, y, z) => [320 + x * 180 + y * 55, 340 + y * 36 - z * 245];
-  ctx.strokeStyle = "#34303f";
+  ctx.strokeStyle = "#292b2c";
   ctx.lineWidth = 1;
   for (let k = 0; k <= 4; k++) {
     const x = k / 2 - 1;
@@ -365,12 +406,12 @@ function renderSpatial(f) {
     path(ctx, l.cell.polygon, (p) =>
       project((p[0] - 0.5) * 2, (p[1] - 0.5) * 2, z),
     );
-    ctx.fillStyle = `rgba(149,134,204,${opacity * 0.15})`;
-    ctx.strokeStyle = `rgba(182,164,236,${opacity})`;
+    ctx.fillStyle = `rgba(164,165,160,${opacity * 0.15})`;
+    ctx.strokeStyle = `rgba(207,208,204,${opacity})`;
     ctx.fill();
     ctx.stroke();
     const xy = project((l.centroid[0] - 0.5) * 2, (l.centroid[1] - 0.5) * 2, z);
-    ctx.fillStyle = "#cfbfff";
+    ctx.fillStyle = "#eeeae3";
     ctx.beginPath();
     ctx.arc(...xy, 1.6, 0, Math.PI * 2);
     ctx.fill();
@@ -382,13 +423,13 @@ function renderSpatial(f) {
         .polygon ?? [],
       (p) => project((p[0] - 0.5) * 2, (p[1] - 0.5) * 2, -0.04),
     );
-    ctx.strokeStyle = "#b5a0ff";
-    ctx.fillStyle = "#7860da44";
+    ctx.strokeStyle = "#bfb7a8";
+    ctx.fillStyle = "#a89a7944";
     ctx.fill();
     ctx.stroke();
   }
   ctx.font = "13px monospace";
-  ctx.fillStyle = "#b5accc";
+  ctx.fillStyle = "#bcbdb8";
   const low = Number($("frequency-min").value),
     high = Number($("frequency-max").value);
   for (const z of [0, 0.25, 0.5, 0.75, 1]) {
@@ -399,8 +440,8 @@ function renderSpatial(f) {
       p[1] + 4,
     );
   }
-  ctx.fillStyle = "#83739f";
-  ctx.fillText("40 Hz · comparison", 18, 28);
+  ctx.fillStyle = "#858783";
+  ctx.fillText("+1 COMPARISON / SHARED STUDY", 18, 28);
   ctx.fillText("XYZ / CELL CENTROID", 18, 49);
   $("voice-count").textContent =
     `${f.bands} + ${comparison?.valid ? 1 : 0} LAYERS`;
@@ -609,6 +650,7 @@ function recordState(at, id) {
     source,
     sourceId: id,
     analysis: summarize(features),
+    study: { chapter:chapterId, fixed:!!frozenStudy, sampleId:currentSourceId },
     settings: {
       ...options(),
       background: background ? "captured" : "none",
@@ -643,7 +685,7 @@ function recordState(at, id) {
   time.textContent = new Date(at).toLocaleTimeString("ja-JP");
   item.append(time, document.createTextNode(label.toUpperCase()));
   const p = document.createElement("p");
-  p.textContent = `暗度 ${features.darkness.toFixed(3)} · 面積 ${(features.area * 100).toFixed(1)}%${comparison ? ` · Δ ${comparison.distance.toFixed(3)}` : ""}`;
+  p.textContent = `[${getChapter(chapterId).title} / ${WAVE_LABELS[soundSettings().waveform]}] 暗度 ${features.darkness.toFixed(3)} · 面積 ${(features.area * 100).toFixed(1)}%${comparison ? ` · Δ ${comparison.distance.toFixed(3)}` : ""}`;
   item.append(p);
   $("timeline").prepend(item);
   while ($("timeline").children.length > 60) $("timeline").lastChild.remove();
@@ -682,7 +724,7 @@ function tick(t) {
   lastFrame = t;
   try {
     if (
-      source !== "demo" &&
+      !frozenStudy && source !== "demo" &&
       !imageSource &&
       video.currentTime === lastSourceTime
     )
@@ -691,15 +733,17 @@ function tick(t) {
     const start = performance.now(),
       w = Number($("resolution").value),
       h = Math.round(w * 0.625),
-      frame = drawSource(t, w, h);
-    if (!frame) return;
+      frame = frozenStudy ? null : drawSource(t, w, h);
+    if (!frame && !frozenStudy) return;
     const at = Date.now(),
-      id = `${source}-${++frameNumber}-${at}`;
-    features = analyze(frame.data, w, h, options());
-    showFrame(contexts[0], frame.data, w, h);
+      id = frozenStudy?.id || `${source}-${++frameNumber}-${at}`;
+    currentSourceId=id;
+    features = frozenStudy?.features || analyze(frame.data, w, h, options());
+    if(frame) showFrame(contexts[0], frame.data, w, h);
+    if(frozenStudy) comparison=frozenStudy.comparison;
     const roi = Number($("roi").value) / 100;
     if (roi < 1) {
-      contexts[0].strokeStyle = "#c0aaff";
+      contexts[0].strokeStyle = "#d1d1cb";
       contexts[0].setLineDash([5, 4]);
       contexts[0].strokeRect(
         (1 - roi) * 320,
@@ -710,15 +754,16 @@ function tick(t) {
       contexts[0].setLineDash([]);
     }
     renderAnalysis(features);
-    if (comparison && Date.now() - comparison.sourceAt > 5000) {
+    $("stage-readout").textContent = `${features.bands} TONE LAYERS · ${WAVE_LABELS[soundSettings().waveform]} · ${soundSettings().organization.toUpperCase()}`;
+    if (!frozenStudy && comparison && Date.now() - comparison.sourceAt > 5000) {
       comparison.valid = false;
       comparison.label = "hold";
       $("comparison-state").textContent = "比較が古いため保留";
     }
-    sources = smoothSources(toSources(features, options(), comparison), dt);
+    sources = smoothSources(applyChapter(toSources(features, options(), comparison), features, soundSettings()), dt);
     audio.update(sources, speakers);
     renderSpatial(features);
-    updateComparison(frame, features, id, at, t);
+    if(!frozenStudy) updateComparison(frame, features, id, at, t);
     if (t - lastLog > 5000) {
       lastLog = t;
       recordState(at, id);
@@ -823,8 +868,8 @@ function renderSpeakers() {
   $("speaker-table").replaceChildren(table);
 }
 function validateCalibration(data) {
-  if (!Array.isArray(data.speakers) || data.speakers.length !== 13)
-    throw Error("13chの校正データが必要です。");
+  if (!Array.isArray(data.speakers) || data.speakers.length !== 18)
+    throw Error("18chの校正データが必要です。");
   return data.speakers.map((s, i) => {
     if (
       s.id !== i + 1 ||
@@ -947,14 +992,10 @@ for (const id of ["bands", "resolution", "roi", "mirror"])
   $(id).onchange = resetAnalysis;
 for (const id of ["frequency-min", "frequency-max"])
   $(id).onchange = () => {
-    const low = clamp(Number($("frequency-min").value), 20, 1000),
-      high = clamp(
-        Number($("frequency-max").value),
-        Math.max(200, low + 1),
-        16000,
-      );
+    const {frequencyMin:low,frequencyMax:high} = soundSettings();
     $("frequency-min").value = low;
     $("frequency-max").value = high;
+    updateSoundUI(); saveSound();
   };
 $("capture-bg").onclick = () => {
   if (!features) return;
@@ -991,7 +1032,7 @@ $("reset").onclick = () => {
     "physical-width": 0,
     "frequency-min": 110,
     "frequency-max": 3520,
-    bands: 256,
+    bands: 30,
     resolution: 320,
     target: 0.12,
     deviation: 0.25,
@@ -1000,6 +1041,7 @@ $("reset").onclick = () => {
     if ($(k + "-value")) $(k + "-value").textContent = Number(v).toFixed(2);
   }
   $("mirror").checked = false;
+  selectChapter("sustain",true);
   resetAnalysis();
   notice("解析と音響の設定を初期値に戻しました。");
 };
@@ -1016,7 +1058,7 @@ const audioMode = document.createElement("select");
 audioMode.id = "audio-mode";
 audioMode.setAttribute("aria-label", "音声出力モード");
 audioMode.add(new Option("ステレオ試聴", "stereo"));
-audioMode.add(new Option("12.1ch 直接出力", "discrete"));
+audioMode.add(new Option("17.1ch 直接出力", "discrete"));
 $("audio-status").after(audioMode);
 $("audio-start").onclick = async () => {
   try {
@@ -1026,11 +1068,11 @@ $("audio-start").onclick = async () => {
       $("audio-status").textContent = "音響停止";
       return;
     }
-    if (source === "camera" && !stream) {
+    if (!frozenStudy && source === "camera" && !stream) {
       await connectCamera();
       if (!stream) return;
     }
-    if (source === "file" && !imageSource && video.readyState < 2) {
+    if (!frozenStudy && source === "file" && !imageSource && video.readyState < 2) {
       notice("動画を選び直して再開してください。", true);
       return;
     }
@@ -1039,11 +1081,11 @@ $("audio-start").onclick = async () => {
     $("audio-start").textContent = "音をミュート";
     $("audio-status").textContent =
       audio.mode === "discrete"
-        ? "12.1ch · ブラウザ直接出力"
+        ? "17.1ch · ブラウザ直接出力"
         : "STEREO MONITOR · 再生中";
     notice(
       audio.mode === "discrete"
-        ? "13chへ出力中。ブラウザの距離重み付けレンダラーです。Spat5出力はブリッジ経由で行います。"
+        ? "18chへ出力中。ブラウザの距離重み付けレンダラーです。会場用Spat5のレンダリングとは異なります。"
         : "影の階調ごとの音が鳴っています。停止ボタンでカメラと音を停止できます。",
     );
   } catch (e) {
@@ -1070,6 +1112,8 @@ function clearMaxStatus(message) {
   for (const [id, label] of [["max-rx","受信"],["max-dsp","DSP"],["max-pre","音源"],["max-out","出力"]]) $(id).textContent = label + " —";
 }
 function connectMax() {
+  notice("従来のMaxパッチは12.1ch・sin波専用です。Coreの波形と4章はブラウザで試聴してください。接続仕様に現在の対応範囲を記載しています。",true); return;
+
   if (socket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(socket.readyState)) { socket.close(); return; }
   try {
     const url = new URL($("bridge-url").value);
@@ -1104,11 +1148,12 @@ setInterval(()=>{if(maxFeedbackAt && Date.now()-maxFeedbackAt>2000) {maxFeedback
 if(new URLSearchParams(location.search).get("max")==="1" && ["127.0.0.1","localhost"].includes(location.hostname)) connectMax();
 $("download-state").onclick = () =>
   download(
-    "shadow-state.json",
+    "core-sound-state.json",
     JSON.stringify(
       {
         at: new Date().toISOString(),
         version: 1,
+        study: {chapter:chapterId, fixed:!!frozenStudy, sampleId:currentSourceId, settings:soundSettings()},
         sources,
         speakers,
         analysis: features ? summarize(features) : null,
@@ -1143,7 +1188,7 @@ $("calibration-import").onchange = async (e) => {
     const f = e.target.files[0];
     if (!f) return;
     const validated = validateCalibration(JSON.parse(await f.text()));
-    speakers.splice(0, 13, ...validated);
+    speakers.splice(0, 18, ...validated);
     renderSpeakers();
     $("calibration-note").textContent = validated.every((x) => x.measured)
       ? "読み込んだ測定値を使用。測定の妥当性は会場で確認してください。"
@@ -1166,7 +1211,7 @@ window.addEventListener("pagehide", () => {
   socket?.close();
 });
 try {
-  const request = indexedDB.open("desymmetrical-traces", 1);
+  const request = indexedDB.open("desymmetrical-core-traces", 1);
   request.onupgradeneeded = () => {
     const s = request.result.createObjectStore("states", { keyPath: "id" });
     s.createIndex("at", "at");
@@ -1191,8 +1236,11 @@ try {
       "記録の保存領域を利用できません。この画面を開いている間の記録は書き出せます。",
     );
 } catch {}
+selectChapter(chapterId);
 renderSpeakers();
 requestAnimationFrame(tick);
+function animateField(t){requestAnimationFrame(animateField);if(document.hidden || t-lastVisual<33)return;lastVisual=t;renderSignalField($("signal-field"),{features,sources,chapter:soundSettings().organization,waveform:$("waveform").value,time:running?t/1000:0,frozen:!!frozenStudy});}
+requestAnimationFrame(animateField);
 export function getStatus() {
   return {
     source,
@@ -1208,6 +1256,8 @@ export function getStatus() {
         }
       : null,
     recordCount: records.length,
+    study: {chapter:chapterId, fixed:!!frozenStudy, sampleId:currentSourceId, settings:soundSettings()},
+    sourceCount:sources.length, speakers:speakers.length,
   };
 }
 if (document.modelContext?.registerTool) {
@@ -1227,16 +1277,16 @@ if (document.modelContext?.registerTool) {
     {
       name: "configure_shadow_bands",
       description:
-        "Set the same 16, 64 or 256 tone-band setting visible in the UI.",
+        "Set the same 16, 30, 64 or 256 tone-band setting visible in the UI.",
       inputSchema: {
         type: "object",
-        properties: { bands: { type: "integer", enum: [16, 64, 256] } },
+        properties: { bands: { type: "integer", enum: [16, 30, 64, 256] } },
         required: ["bands"],
         additionalProperties: false,
       },
       execute: (input) => {
-        if (![16, 64, 256].includes(input?.bands))
-          throw Error("bands must be 16, 64 or 256");
+        if (![16, 30, 64, 256].includes(input?.bands))
+          throw Error("bands must be 16, 30, 64 or 256");
         $("bands").value = input.bands;
         resetAnalysis();
         return { bands: input.bands };

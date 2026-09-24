@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#111116" />
     <meta
       name="description"
-      content="影の階調、輪郭、半影を測り、層状の空間音響へ変換する De-symmetrical Adaptation の観測環境。"
+      content="影の階調、輪郭、半影を測り、層状の空間音響へ変換する De-symmetrical Core の観測環境。"
     />
-    <title>De-symmetrical Adaptation · Shadow Lab</title>
+    <title>De-symmetrical Core · Shadow Lab</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -16,45 +16,65 @@
       <div class="identity">
         <span class="mark">φ</span>
         <div>
-          <h1>De-symmetrical Adaptation</h1>
-          <p>SHADOW → ANALYSIS → SOUND</p>
+          <h1>De-symmetrical Core</h1>
+          <p>SHADOW STUDY / FOUR CHAPTERS</p>
         </div>
       </div>
       <div class="header-actions">
         <span id="state" class="status">テスト信号</span
-        ><button id="max-connect" class="primary">Maxへ接続</button><button id="audio-start">ブラウザで試聴</button
+        ><button id="max-connect" hidden>Maxへ接続</button><button id="audio-start" class="primary">ブラウザで試聴</button
         ><button id="stop" class="stop">停止</button>
       </div>
     </header>
     <main>
       <section class="toolbar" aria-label="観測設定">
         <label
-          >入力<select id="source">
+          >入力<select id="source" data-freeze-lock>
             <option value="demo">テスト信号</option>
             <option value="camera">カメラ</option>
             <option value="file">動画・画像</option>
           </select></label
         ><label
-          >カメラ<select id="camera">
+          >カメラ<select id="camera" data-freeze-lock>
             <option value="">Mac の標準カメラ</option>
           </select></label
-        ><button id="camera-start">カメラを接続</button
+        ><button id="camera-start" data-freeze-lock>カメラを接続</button
         ><label
-          >階調<select id="bands">
+          >階調<select id="bands" data-freeze-lock>
             <option>16</option>
-            <option>64</option>
-            <option selected>256</option>
+            <option selected>30</option>
+            <option>64</option><option>256</option>
           </select></label
         ><span class="toolbar-end" id="performance">観測を準備中</span>
       </section>
       <div id="notice" role="status">
-        テスト信号で解析を開始します。実物の影を測るには「カメラを接続」を押してください。Maxで鳴らすには「Maxへ接続」。ブラウザだけで聴く場合は「ブラウザで試聴」。
+        テスト信号で解析を開始します。実物の影を測るには「カメラを接続」を押してください。音を聴くには「ブラウザで試聴」。
       </div>
-      <section class="max-monitor" aria-label="Maxの受信・出力確認">
-        <div><strong>MAX / SPAT5</strong><span id="max-status" role="status">未接続 · Maxパッチの①から起動</span></div>
-        <div class="max-readings"><span id="max-rx">受信 —</span><span id="max-dsp">DSP —</span><span id="max-pre">音源 —</span><span id="max-out">出力 —</span></div>
-        <p>Max内で ①接続サービス起動 → ②出力先 → ③DSP → ④音量 → ⑤テスト。<a href="./protocol.html#max">手順を見る</a> · <a href="./De-symmetrical-Max.zip">Max一式</a> · <a href="http://127.0.0.1:5173/?max=1">このMacの接続用UI</a></p>
+      <section class="signal-stage"><div class="stage-heading"><span>LIVE SONIFICATION / CORE STUDY</span><span id="stage-mode">I / CONTINUUM</span></div><canvas id="signal-field" width="1500" height="650" aria-label="影の階調と音組織を示すリアルタイム表示"></canvas><div class="stage-footer"><span id="stage-readout">30 TONE LAYERS</span><span>SHADOW → ORGANIZATION → SPACE</span></div></section>
+      <section class="chapter-lab" aria-label="4章の音組織">
+        <div class="chapter-heading"><div><span class="eyebrow">DE-SYMMETRICAL CORE · v22 STUDY</span><h2>同じ影から、異なる音の経験へ。</h2><p>4章構成の実験案。音素材・時間構造・周波数帯を切り替え、聴こえ方の違いを比較します。</p></div><span class="core-spec">30層 + 比較1層<br>壁16 + アーム1 + Sub</span></div>
+        <div id="chapter-cards" class="chapter-cards" role="group" aria-label="章の選択"></div>
+        <div class="sound-workbench">
+          <div class="wave-display"><canvas id="wave-preview" width="240" height="70" aria-label="選択した波形の模式図"></canvas><strong id="current-wave">sin波（従来版）</strong><small>波形の模式図 · 音声測定ではありません</small></div>
+          <div class="sound-controls">
+            <label>波形<select id="waveform"><option value="sine">sin波（従来版）</option><option value="square">矩形波</option><option value="sawtooth">ノコギリ波</option><option value="triangle">三角波</option><option value="noise">帯域ノイズ</option></select></label>
+            <label>音の組織<select id="organization"><option value="sustain">持続する階調の層</option><option value="pulse">独立したパルス</option><option value="harmonic">倍音列への配置</option><option value="texture">拡散するテクスチャ</option></select></label>
+            <label>最低周波数 (Hz)<input id="frequency-min" type="number" min="20" max="15999" value="110"></label>
+            <label>最高周波数 (Hz)<input id="frequency-max" type="number" min="21" max="16000" value="3520"></label>
+            <label>パルス密度 (Hz)<input id="pulse-rate" type="number" min="0.25" max="16" step="0.25" value="3"></label>
+            <label>倍音の基音 (Hz)<input id="harmonic-fundamental" type="number" min="20" max="1000" step="1" value="55"></label>
+          </div>
+        </div>
+        <p id="chapter-description" class="chapter-description"></p>
+        <div class="compare-row"><button id="freeze-analysis">解析値を固定して比較</button><span id="sample-status" role="status">LIVE · 入力に追従</span><button id="chapter-reset">この章の初期値</button><button id="export-study">4章の設定を書き出す</button></div>
+        <p class="study-note">「解析値を固定」で同一フレームを4章に使用。各章の変更は端末に保存されます。周波数の上下限は各章で変更できます。矩形波・ノコギリ波等は倍音を含み、設定帯域は基音（ノイズは中心周波数）の範囲です。</p>
       </section>
+      <details class="max-legacy"><summary>外部Maxとの接続について</summary>      <section class="max-monitor" aria-label="Maxの受信・出力確認">
+        <div><strong>MAX / SPAT5</strong><span id="max-status" role="status">従来版12.1ch・sin波専用 / Core拡張は未対応</span></div>
+        <div class="max-readings"><span id="max-rx">受信 —</span><span id="max-dsp">DSP —</span><span id="max-pre">音源 —</span><span id="max-out">出力 —</span></div>
+        <p>Coreの4章・波形切替はブラウザ音響で利用できます。従来Maxパッチでは再現されません。<a href="./protocol.html#max">手順を見る</a> · <a href="https://keigoyoshida7.github.io/desymmetrical-adaptation-web/De-symmetrical-Max.zip">従来版Max一式</a> · <a href="http://127.0.0.1:5173/?max=1">従来版ローカルUI</a></p>
+      </section>
+      </details>
       <section class="observatory">
         <article class="panel">
           <div class="panel-head">
@@ -72,7 +92,7 @@
           </div>
           <div class="panel-foot">
             <span id="source-detail">合成した階調信号 · 実測ではありません</span
-            ><button id="capture-bg">明るい基準を取得</button>
+            ><button id="capture-bg" data-freeze-lock>明るい基準を取得</button>
           </div>
         </article>
         <article class="panel">
@@ -91,7 +111,7 @@
               height="400"
               aria-label="影の階調、輪郭、半影の解析結果"
             ></canvas
-            ><span class="canvas-note" id="band-note">256 TONE BANDS</span>
+            ><span class="canvas-note" id="band-note">30 TONE BANDS</span>
           </div>
           <div class="metrics">
             <div><small>影の面積</small><strong id="area">—</strong></div>
@@ -106,7 +126,7 @@
           <div class="panel-head">
             <h2><em>03</em> 比較像</h2>
             <label class="inline"
-              >比較<select id="comparison">
+              >比較<select id="comparison" data-freeze-lock>
                 <option value="none">オフ</option>
                 <option value="transform">変形テスト</option>
                 <option value="file">画像を読込</option>
@@ -133,7 +153,7 @@
         <article class="panel spectral-panel">
           <div class="panel-head">
             <h2><em>04</em> 音の層</h2>
-            <span id="voice-count">256 + 1 LAYERS</span>
+            <span id="voice-count">30 + 1 LAYERS</span>
           </div>
           <div class="canvas-wrap">
             <canvas
@@ -169,7 +189,7 @@
             <label
               >影のしきい値 <output id="threshold-value">0.12</output
               ><input
-                id="threshold"
+                id="threshold" data-freeze-lock
                 type="range"
                 min="0.02"
                 max="0.8"
@@ -178,7 +198,7 @@
             ><label
               >階調ガンマ <output id="gamma-value">1.00</output
               ><input
-                id="gamma"
+                id="gamma" data-freeze-lock
                 type="range"
                 min="0.3"
                 max="3"
@@ -194,27 +214,13 @@
                 step="0.05"
                 value="0.7" /></label
             ><label
-              >解析解像度<select id="resolution">
+              >解析解像度<select id="resolution" data-freeze-lock>
                 <option value="160">160 × 100</option>
                 <option value="320" selected>320 × 200</option>
                 <option value="640">640 × 400</option>
               </select></label
             >
             <label
-              >最低周波数 (Hz)<input
-                id="frequency-min"
-                type="number"
-                min="20"
-                max="1000"
-                value="110" /></label
-            ><label
-              >最高周波数 (Hz)<input
-                id="frequency-max"
-                type="number"
-                min="200"
-                max="16000"
-                value="3520" /></label
-            ><label
               >空間の広がり <output id="spread-value">1.00</output
               ><input
                 id="spread"
@@ -235,7 +241,7 @@
             /></label>
             <label
               >解析範囲（中央から %）<input
-                id="roi"
+                id="roi" data-freeze-lock
                 type="range"
                 min="20"
                 max="100"
@@ -250,9 +256,9 @@
                 value="0"
                 placeholder="0 = ピクセル表示" /></label
             ><label class="check"
-              ><input type="checkbox" id="mirror" />左右を反転</label
+              ><input type="checkbox" id="mirror" data-freeze-lock />左右を反転</label
             ><label class="check"
-              ><input type="checkbox" id="speak" />状態の読み上げ</label
+              ><input type="checkbox" id="speak" />運用者向け読み上げ</label
             >
           </div>
           <details>
@@ -292,15 +298,13 @@
             </div>
             <p>
               StreamDiffusion
-              は接続時だけ入力画像を指定先に送信します。変形テストは画像生成AIではありません。Max
-              / Spat5 は同梱ブリッジ経由で接続します。
+              は接続時だけ入力画像を指定先に送信します。変形テストは画像生成AIではありません。従来のMax / Spat5パッチは12.1ch・sin波専用です。Core版の章・波形には未対応です。
             </p>
           </details>
           <details>
-            <summary>12.1ch 配置・校正</summary>
+            <summary>17.1ch 配置・校正</summary>
             <p>
-              前面4 + ディスプレイ間仕切り4 + 天井4 +
-              Sub1。ブラウザでの試聴はステレオです。13出力の機器とSpat5で展示用にレンダリングします。
+              壁16（各壁2列×2段） + アーム1 + Sub1。ステレオ試聴と、18出力に対応した機器でのブラウザ直接出力を選べます。座標は7m角を仮定した編集可能な初期値です。
             </p>
             <div id="speaker-table"></div>
             <div class="button-row">
@@ -313,17 +317,16 @@
               /></label>
             </div>
             <p id="calibration-note">
-              初期配置は資料の比率に基づく仮配置。極性・遅延・ゲイン・EQは会場で測定して調整します。
+              壁16・アーム1・Subの座標は仮配置。アーム位置は手動設定で、実機には追従しません。極性・遅延・ゲイン・EQは会場で測定して調整します。
             </p>
           </details>
           <details>
             <summary>資料との対応と測定の条件</summary>
             <p>
-              16 / 64 / 256階調、輪郭・半影（p.3,
-              8）を共通解析。階調→周波数と高さ、Voronoiセル重心→XYZ、面積→広がり、半影幅→残響（p.9）。256層と比較用1層を保持します。周波数補間・しきい値・音色は資料に数式がないため変更できる実装値です。
+              Core EN v22（p.10–11）の30階調＋比較1層を初期値に採用。階調→周波数・高さ、セル重心→XYZ、面積→広がり、半影幅→残響を共通の出発点にします。16 / 64 / 256階調も選べます。4章の具体的な音組織、周波数範囲、音色は検討用の実装案です。
             </p>
             <p>
-              カメラの暗い物体と影は単眼画像だけでは完全に分離できません。均一な明るい面で基準を取得し、影を解析範囲に収めてください。半影幅は勾配に基づく推定値です。Macカメラでは資料の24.6MP・Mono12・ミリメートル精度を保証しません。
+              カメラの暗い物体と影は単眼画像だけでは完全に分離できません。均一な明るい面で基準を取得し、影を解析範囲に収めてください。半影幅は勾配に基づく推定値です。ブラウザ版はカメラ1系統のRGB入力で、資料の2台の影カメラ、ロボット位置追跡、会場校正を再現するものではありません。
             </p>
             <p>
               比較の由来・鮮度・値域・継続的な観測を検査。depart / converge /
@@ -351,7 +354,7 @@
       </section>
     </main>
     <footer>
-      <span>KEIGO YOSHIDA · DE-SYMMETRICAL ADAPTATION</span
+      <span>KEIGO YOSHIDA · DE-SYMMETRICAL CORE</span
       ><span>観測 / 比較 / 音響</span>
     </footer>
     <video id="video" playsinline muted hidden></video

@@ -7,7 +7,7 @@ class ShadowProcessor extends AudioWorkletProcessor {
       options.processorOptions?.channels ?? 2,
     );
     this.port.onmessage = (e) => {
-      if (e.data.type === "state")
+      if (e.data?.type === "state")
         this.synth.update(e.data.sources, e.data.volume, e.data.speakers);
     };
   }

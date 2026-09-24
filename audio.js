@@ -1,3 +1,8 @@
+const CORE_OUTPUT_CHANNELS = 18;
+const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
+const bounded = (value, minimum, maximum, fallback) =>
+  Math.min(maximum, Math.max(minimum, finite(value, fallback)));
+
 export class ShadowAudio {
   constructor() {
     this.context = null;
@@ -7,6 +12,7 @@ export class ShadowAudio {
     this.epoch = 0;
     this.calibration = [];
     this.calibrationKey = "";
+    this.discreteChannels = CORE_OUTPUT_CHANNELS;
   }
   async start(mode = "stereo") {
     await this.stop();
@@ -15,10 +21,12 @@ export class ShadowAudio {
     this.context = context;
     try {
       await context.resume();
-      const channels = mode === "discrete" ? 13 : 2;
+      const channels = mode === "discrete"
+        ? Math.round(bounded(this.discreteChannels, 2, 32, CORE_OUTPUT_CHANNELS))
+        : 2;
       if (channels > context.destination.maxChannelCount)
         throw Error(
-          `この出力は${context.destination.maxChannelCount}chまでです。12.1chには13出力の機器が必要です。`,
+          `この出力は${context.destination.maxChannelCount}chまでです。Core 17.1chには18出力対応の機器・ブラウザ設定が必要です。ステレオ試聴も選べます。`,
         );
       await context.audioWorklet.addModule(
         new URL("./audio-worklet.js", import.meta.url),
@@ -27,8 +35,8 @@ export class ShadowAudio {
         if (context.state !== "closed") await context.close();
         throw Error("音の開始を取り消しました。");
       }
-      if (channels === 13) {
-        context.destination.channelCount = 13;
+      if (mode === "discrete") {
+        context.destination.channelCount = channels;
         context.destination.channelCountMode = "explicit";
         context.destination.channelInterpretation = "discrete";
       }
@@ -37,6 +45,8 @@ export class ShadowAudio {
         numberOfOutputs: 2,
         outputChannelCount: [channels, 2],
         processorOptions: { channels },
+        channelCountMode: "explicit",
+        channelInterpretation: "discrete",
       });
       this.node = node;
       const reverb = context.createConvolver(),
@@ -59,24 +69,24 @@ export class ShadowAudio {
         node.connect(context.destination, 0);
         reverb.connect(context.destination);
       } else {
-        const split = context.createChannelSplitter(13),
+        const split = context.createChannelSplitter(channels),
           wet = context.createChannelSplitter(2),
-          merge = context.createChannelMerger(13);
+          merge = context.createChannelMerger(channels);
         node.connect(split, 0);
         reverb.connect(wet);
         const curve = new Float32Array(4096);
         for (let i = 0; i < curve.length; i++)
           curve[i] = Math.tanh((i / (curve.length - 1)) * 2 - 1);
         this.calibration = [];
-        for (let i = 0; i < 13; i++) {
+        for (let i = 0; i < channels; i++) {
           const gain = context.createGain(),
             delay = context.createDelay(1),
             limiter = context.createWaveShaper();
           limiter.curve = curve;
           split.connect(gain, i);
-          if (i < 12) {
+          if (i < channels - 1) {
             const diffuse = context.createGain();
-            diffuse.gain.value = 1 / Math.sqrt(6);
+            diffuse.gain.value = 1 / Math.sqrt((channels - 1) / 2);
             wet.connect(diffuse, i % 2);
             diffuse.connect(gain);
           }
@@ -88,6 +98,18 @@ export class ShadowAudio {
           });
           gain.connect(delay);
           let tail = delay;
+          if (i === channels - 1) {
+            // Every selected waveform, including overtone-rich shapes and
+            // noise, reaches the sub only through a fourth-order low-pass.
+            for (let stage = 0; stage < 2; stage++) {
+              const lowpass = context.createBiquadFilter();
+              lowpass.type = "lowpass";
+              lowpass.frequency.value = 100;
+              lowpass.Q.value = stage === 0 ? 0.5411961 : 1.306563;
+              tail.connect(lowpass);
+              tail = lowpass;
+            }
+          }
           for (const f of filters) {
             tail.connect(f);
             tail = f;
@@ -124,16 +146,16 @@ export class ShadowAudio {
           if (!s) return;
           const t = this.context.currentTime;
           c.gain.gain.setTargetAtTime(
-            10 ** (s.gainDb / 20) * s.polarity,
+            10 ** (bounded(s.gainDb, -60, 12, 0) / 20) * (s.polarity === -1 ? -1 : 1),
             t,
             0.04,
           );
-          c.delay.delayTime.setTargetAtTime(s.delayMs / 1000, t, 0.04);
+          c.delay.delayTime.setTargetAtTime(bounded(s.delayMs, 0, 1000, 0) / 1000, t, 0.04);
           c.filters.forEach((f, j) => {
             const eq = s.eq?.[j];
-            f.frequency.value = eq?.frequency ?? 1000;
-            f.Q.value = eq?.q ?? 1;
-            f.gain.value = eq?.gainDb ?? 0;
+            f.frequency.value = bounded(eq?.frequency, 20, this.context.sampleRate * 0.45, 1000);
+            f.Q.value = bounded(eq?.q, 0.1, 20, 1);
+            f.gain.value = bounded(eq?.gainDb, -24, 24, 0);
           });
         });
       }

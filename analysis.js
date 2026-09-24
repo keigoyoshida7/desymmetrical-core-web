@@ -89,10 +89,10 @@ export function contourVoronoi(contour) {
   return { polygon, seed: s, neighbors, ...polygonMetrics(polygon) };
 }
 export function analyze(rgba, width, height, options = {}) {
-  if (![16, 64, 256].includes(options.bands ?? 256))
+  if (![16, 30, 64, 256].includes(options.bands ?? 30))
     throw Error("Invalid band count");
   if (rgba.length !== width * height * 4) throw Error("Frame size mismatch");
-  const bands = options.bands ?? 256,
+  const bands = options.bands ?? 30,
     threshold = clamp(options.threshold ?? 0.12, 0.02, 0.8),
     gamma = clamp(options.gamma ?? 1, 0.3, 3),
     roi = clamp(options.roi ?? 1, 0.2, 1),
@@ -240,7 +240,7 @@ export function analyze(rgba, width, height, options = {}) {
   };
 }
 export function toSources(features, options = {}, comparison = null) {
-  const low = clamp(options.frequencyMin ?? 110, 20, 1000),
+  const low = clamp(options.frequencyMin ?? 110, 20, 15999),
     high = clamp(options.frequencyMax ?? 3520, low + 1, 16000),
     spreadScale = clamp(options.spread ?? 1, 0, 2),
     reverb =
@@ -250,9 +250,9 @@ export function toSources(features, options = {}, comparison = null) {
     id: l.id,
     tone: l.tone,
     frequency: low * (high / low) ** l.tone,
-    x: (l.centroid[0] - 0.5) * 2.4,
-    y: (0.5 - l.centroid[1]) * 2.6,
-    z: 0.319 + l.tone * (1.65 - 0.319),
+    x: (l.centroid[0] - 0.5) * 7,
+    y: (0.5 - l.centroid[1]) * 7,
+    z: 0.5 + l.tone * 3,
     gain: Math.sqrt(l.density) * (1 - l.tone * 0.5),
     density: l.density,
     spread: clamp(Math.sqrt(l.area) * spreadScale),
@@ -273,9 +273,9 @@ export function toSources(features, options = {}, comparison = null) {
       id: 257,
       tone: 0,
       frequency: 40,
-      x: (cell.centroid[0] - 0.5) * 2.4,
-      y: (0.5 - cell.centroid[1]) * 2.6,
-      z: 0.319,
+      x: (cell.centroid[0] - 0.5) * 7,
+      y: (0.5 - cell.centroid[1]) * 7,
+      z: 0.5,
       gain: clamp(d) * 0.45,
       density: f.area,
       spread: clamp(Math.sqrt(cell.area)),
