@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CHAPTERS, getChapter, normalizeSoundSettings, applyChapter } from "../chapters.js";
+import { CHAPTERS, WAVEFORMS, ORGANIZATIONS, getChapter, normalizeSoundSettings, applyChapter } from "../chapters.js";
 
 const features = { width: 100, penumbraWidth: 4 };
 const source = (tone, frequency) => ({
@@ -10,7 +10,10 @@ const source = (tone, frequency) => ({
 });
 
 test("four provisional presets are JSON-friendly and preserve the legacy sine preset", () => {
-  assert.deepEqual(CHAPTERS.map((chapter) => chapter.id), ["sustain", "pulse", "harmonic", "texture"]);
+  assert.deepEqual(CHAPTERS.map((chapter) => chapter.id), ["sustain", "harmonic", "texture", "interference"]);
+  assert.deepEqual(CHAPTERS.map((chapter) => chapter.number), ["I", "II", "III", "IV"]);
+  assert.deepEqual(WAVEFORMS, ["sine", "noise", "triangle"]);
+  assert.deepEqual(ORGANIZATIONS, CHAPTERS.map((chapter) => chapter.id));
   assert.deepEqual(JSON.parse(JSON.stringify(CHAPTERS)), CHAPTERS);
   assert.equal(getChapter("sustain").waveform, "sine");
   assert.equal(getChapter("sustain").frequencyMin, 110);
@@ -19,21 +22,20 @@ test("four provisional presets are JSON-friendly and preserve the legacy sine pr
 });
 
 test("preset defaults and independent waveform/organization overrides normalize safely", () => {
-  const normalized = normalizeSoundSettings({ chapter: "texture", waveform: "sawtooth", organization: "pulse" });
+  const normalized = normalizeSoundSettings({ chapter: "texture", waveform: "triangle", organization: "interference" });
   assert.equal(normalized.chapterId, "texture");
-  assert.equal(normalized.waveform, "sawtooth");
-  assert.equal(normalized.organization, "pulse");
+  assert.equal(normalized.waveform, "triangle");
+  assert.equal(normalized.organization, "interference");
   assert.equal(normalized.frequencyMin, 800);
   assert.equal(normalized.frequencyMax, 8000);
-  const invalid = normalizeSoundSettings({ waveform: "invalid", frequencyMin: 20000, frequencyMax: -2, pulseRate: Infinity, pulseWidth: -1, harmonicFundamental: 5000 });
+  const invalid = normalizeSoundSettings({ waveform: "invalid", frequencyMin: 20000, frequencyMax: -2, beatHz: Infinity, harmonicFundamental: 5000 });
   assert.equal(invalid.frequencyMin, 15999);
   assert.equal(invalid.frequencyMax, 16000);
   assert.equal(invalid.waveform, "sine");
-  assert.equal(invalid.pulseRate, 2);
-  assert.equal(invalid.pulseWidth, 0.02);
+  assert.equal(invalid.beatHz, 1.5);
   assert.equal(invalid.harmonicFundamental, 1000);
-  assert.equal(normalizeSoundSettings({ pulseRate: 0 }).pulseRate, 0.25);
-  assert.equal(normalizeSoundSettings({ pulseRate: 99 }).pulseRate, 16);
+  assert.equal(normalizeSoundSettings({ beatHz: 0 }).beatHz, 0.1);
+  assert.equal(normalizeSoundSettings({ beatHz: 99 }).beatHz, 8);
   assert.equal(normalizeSoundSettings({ frequencyMin: "120", frequencyMax: "240" }).frequencyMax, 240);
   assert.equal(normalizeSoundSettings(null).chapterId, "sustain");
 });
@@ -52,13 +54,38 @@ test("sustain retains original frequencies, gains, and geometry without mutating
   });
 });
 
-test("pulse organization produces stable tone-ordered timing independent of array order", () => {
-  const input = [source(0, 220), source(0.5, 880), source(1, 1760)];
-  const output = applyChapter(input, features, { chapterId: "pulse", pulseRate: 5, pulseWidth: 0.3 });
-  assert.deepEqual(output.map((item) => item.phaseOffset), [0, 0.375, 0.75]);
-  assert.ok(output.every((item) => item.pulseRate === 5 && item.pulseWidth === 0.3 && item.waveform === "square"));
-  const reversed = applyChapter(input.toReversed(), features, { chapterId: "pulse" });
-  assert.deepEqual(reversed.map((item) => item.phaseOffset), [0.75, 0.375, 0]);
+test("removed saved waveform and organization values normalize to supported defaults", () => {
+  for (const waveform of ["square", "sawtooth"]) {
+    const settings = normalizeSoundSettings({ chapterId: "pulse", organization: "pulse", waveform,
+      pulseRate: 4, pulseWidth: 0.5 });
+    assert.equal(settings.chapterId, "sustain");
+    assert.equal(settings.organization, "sustain");
+    assert.equal(settings.waveform, "sine");
+    assert.equal("pulseRate" in settings, false);
+    assert.equal("pulseWidth" in settings, false);
+  }
+});
+
+test("interference maps tones to nearby sustained pairs within the configured band", () => {
+  const input = [source(0, 110), source(0.5, 440), source(1, 1760)];
+  const captured = structuredClone(input);
+  const output = applyChapter(input, features, { chapterId: "interference", beatHz: 2 });
+  assert.deepEqual(input, captured);
+  assert.deepEqual(output.map((item) => item.detuneHz), [1, 2, 3]);
+  assert.deepEqual(output.map((item) => item.frequency), [110.5, 440, 1758.5]);
+  output.forEach((item, index) => {
+    assert.ok(item.frequency - item.detuneHz / 2 >= 110);
+    assert.ok(item.frequency + item.detuneHz / 2 <= 1760);
+    for (const field of ["id", "gain", "x", "y", "z", "spread"])
+      assert.equal(item[field], input[index][field]);
+  });
+  const narrow = applyChapter([source(1, 100)], features, {
+    chapterId: "interference", frequencyMin: 99, frequencyMax: 100, beatHz: 8,
+  });
+  assert.equal(narrow[0].detuneHz, 1);
+  assert.equal(narrow[0].frequency, 99.5);
+  const ordinary = applyChapter(output, features, { chapterId: "sustain" });
+  assert.ok(ordinary.every((item) => item.detuneHz === 0));
 });
 
 test("harmonic organization selects integer partials in range and changes spatial distribution", () => {
@@ -94,9 +121,9 @@ test("texture widens spatial spread with measured penumbra while preserving ampl
   assert.equal(outer[0].y, -3.5, "texture expansion stays within the 7 m room");
 });
 
-test("all five waveforms remain available with every organization", () => {
+test("all three waveforms remain available with every organization", () => {
   for (const chapter of CHAPTERS) {
-    for (const waveform of ["sine", "square", "sawtooth", "triangle", "noise"]) {
+    for (const waveform of WAVEFORMS) {
       const result = applyChapter([source(0.5, 1000)], features, { chapterId: chapter.id, waveform });
       assert.equal(result[0].waveform, waveform);
       assert.equal(result[0].organization, chapter.organization);

@@ -8,8 +8,6 @@ const mono = '"SFMono-Regular", Consolas, "Liberation Mono", monospace';
 
 function waveAt(phase, waveform) {
   const phase01 = ((phase / TAU) % 1 + 1) % 1;
-  if (waveform === 'square') return Math.tanh(Math.sin(phase) * 4);
-  if (waveform === 'sawtooth') return 2 * phase01 - 1;
   if (waveform === 'triangle') return 1 - 4 * Math.abs(phase01 - .5);
   if (waveform === 'noise') return (Math.sin(phase * 7.31) + .5 * Math.sin(phase * 17.7)) / 1.5;
   return Math.sin(phase);
@@ -77,7 +75,7 @@ export function renderSignalField(canvas, { features = null, sources = [], chapt
   const maxGain = Math.max(.008, ...sourceList.map(s => value(s.gain)));
   const baseRadius = 232 + area * 74;
   const drift = Math.sin(t * .18) * 5;
-  const warm = kind === 'pulse' ? [200, 157, 121] : [190, 169, 146];
+  const warm = kind === 'interference' ? [200, 176, 147] : [190, 169, 146];
 
   // Sparse registration marks keep the field a visual instrument, not a card.
   for (const [x, y] of [[180, 70], [1320, 70], [180, 572], [1320, 572]]) {
@@ -113,7 +111,6 @@ export function renderSignalField(canvas, { features = null, sources = [], chapt
     const sourceX = bounded(value(source?.x) / 3.5, -1, 1);
     const sourceY = bounded(value(source?.y) / 3.5, -1, 1);
     const phase = tone * TAU + t * .07;
-    const pulse = kind === 'pulse' ? .5 + .5 * Math.sin(t * 2.1 - tone * TAU) : 1;
     const alpha = hasData ? .25 + signal * .62 : .10;
     const colored = i % 7 === 2 || (kind === 'texture' && i % 3 === 0);
     const rgb = colored ? warm : [235, 240, 237];
@@ -141,7 +138,8 @@ export function renderSignalField(canvas, { features = null, sources = [], chapt
     // They share the layer's contour, gain, centroid and organization: they are
     // visual detail, not additional inferred sources or measured channels.
     for (let strand = 4; strand >= 0; strand--) {
-      const ribbon = (strand-2) * (1.8 + signal * 1.7);
+      const pairDrift = kind === 'interference' ? Math.sin(t * .28 + tone * TAU) * 8 : 0;
+      const ribbon = (strand-2) * (1.8 + signal * 1.7) + (kind === 'interference' ? (strand % 2 ? -1 : 1) * (10 + pairDrift) : 0);
       const strandPoints = [];
       for (let k = 0; k <= segments; k++) {
         const { theta, contour } = shape[k];
@@ -157,7 +155,7 @@ export function renderSignalField(canvas, { features = null, sources = [], chapt
           + Math.cos(angle)*(tone-.5)*92 + curl*12 + ribbon*Math.cos(angle*2+tone) + material;
         strandPoints.push([x,y,depth]);
       }
-      const visualAlpha = alpha * (strand === 2 ? .77 : .29) * (.68+.32*pulse);
+      const visualAlpha = alpha * (strand === 2 ? .77 : .29);
       ctx.beginPath(); ctx.moveTo(strandPoints[0][0],strandPoints[0][1]);
       for (let k = 1; k < strandPoints.length; k++) ctx.lineTo(strandPoints[k][0],strandPoints[k][1]);
       ctx.strokeStyle = `rgba(${rgb.join(',')},${visualAlpha})`;
@@ -187,11 +185,6 @@ export function renderSignalField(canvas, { features = null, sources = [], chapt
     ctx.beginPath(); ctx.moveTo(exit[0],exit[1]);
     ctx.bezierCurveTo(1175, exit[1], 1205, outputY, 1329, outputY);
     ctx.strokeStyle = `rgba(${rgb.join(',')},${alpha * .22})`; ctx.lineWidth = .6; ctx.stroke();
-    if (kind === 'pulse') {
-      const cursor = points[Math.floor((((t*.08+tone)%1)+1)%1 * segments)];
-      ctx.fillStyle = `rgba(222,200,174,${.25+signal*.6})`;
-      ctx.beginPath(); ctx.arc(cursor[0], cursor[1], 1.4, 0, TAU); ctx.fill();
-    }
     text(ctx, String(layerIndex+1).padStart(2, '0'), 42, inputY+3, '#929b9b', 10);
     line(ctx, 72, inputY, 72+71*signal, inputY, `rgba(209,215,210,${.25+signal*.48})`, .8);
     line(ctx, 72+71*signal, inputY, 158, inputY, '#272d2e', .5);

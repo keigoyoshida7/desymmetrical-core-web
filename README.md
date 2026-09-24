@@ -7,16 +7,18 @@ A browser instrument for comparing four provisional sound organizations from the
 ## Listen and compare
 
 1. Choose the test signal, a camera, or an image/video. Camera frames are processed locally.
-2. Click **ブラウザで試聴** to start sound. Sine is the original Adaptation waveform; square, sawtooth, triangle and band-pass noise are also available.
+2. Click **ブラウザで試聴** to start sound. The waveform choices are **sine (original), band-pass noise, triangle**, in that order.
 3. Click **解析値を固定して比較** to keep the exact same analyzed frame while switching chapters, waveform or frequency range.
 4. Edit each chapter independently. Settings persist locally; export the four settings and current analysis/source data as JSON.
 
 | Provisional chapter | Default material | Organization | Fundamental / center range |
 |---|---|---|---|
 | I Sustain | Original sine | Continuous tonal layers | 110–3520 Hz |
-| II Pulse | Square | Short, phase-offset pulses | 220–1760 Hz |
-| III Harmonic | Triangle | Integer harmonics and horizontal ring positions | 55–880 Hz |
-| IV Texture | Band-pass noise | Overlapping bands and penumbra-driven spread | 800–8000 Hz |
+| II Harmonic | Triangle | Integer harmonics and horizontal ring positions | 55–880 Hz |
+| III Texture | Band-pass noise | Overlapping bands and penumbra-driven spread | 800–8000 Hz |
+| IV Interference | Sine | Pairs of nearby, continuously sounding frequencies | 110–1760 Hz |
+
+Interference adds a second continuous oscillator around each source frequency. The frequency difference is adjustable from 0.1 to 8 Hz and varies with tone; both frequencies stay within the selected band. Sine/triangle pairs produce natural beating without gating the sound on and off. With noise, two independently filtered bands overlap instead of producing a predictable beat. Switching to the revised chapter order keeps the saved Harmonic and Texture settings and replaces removed options with supported defaults.
 
 These are editable study proposals, not a fixed composition prescribed by the PDF. The waveform and organization can be chosen independently. Waveforms with harmonics extend above the selected fundamental range; noise bandwidth extends around the selected center frequency. If a custom harmonic band contains no partial of its chosen fundamental, frequency remains inside that band without quantization. Sound levels are not perceptually loudness-matched across materials; adjust volume when comparing.
 

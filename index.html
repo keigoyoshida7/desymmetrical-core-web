@@ -14,7 +14,6 @@
   <body>
     <header>
       <div class="identity">
-        <span class="mark">φ</span>
         <div>
           <h1>De-symmetrical Core</h1>
           <p>SHADOW STUDY / FOUR CHAPTERS</p>
@@ -57,17 +56,17 @@
         <div class="sound-workbench">
           <div class="wave-display"><canvas id="wave-preview" width="240" height="70" aria-label="選択した波形の模式図"></canvas><strong id="current-wave">sin波（従来版）</strong><small>波形の模式図 · 音声測定ではありません</small></div>
           <div class="sound-controls">
-            <label>波形<select id="waveform"><option value="sine">sin波（従来版）</option><option value="square">矩形波</option><option value="sawtooth">ノコギリ波</option><option value="triangle">三角波</option><option value="noise">帯域ノイズ</option></select></label>
-            <label>音の組織<select id="organization"><option value="sustain">持続する階調の層</option><option value="pulse">独立したパルス</option><option value="harmonic">倍音列への配置</option><option value="texture">拡散するテクスチャ</option></select></label>
+            <label>波形<select id="waveform"><option value="sine">sin波（従来版）</option><option value="noise">帯域ノイズ</option><option value="triangle">三角波</option></select></label>
+            <label>音の組織<select id="organization"><option value="sustain">持続する階調の層</option><option value="harmonic">倍音列への配置</option><option value="texture">拡散するテクスチャ</option><option value="interference">近接する持続音の干渉</option></select></label>
             <label>最低周波数 (Hz)<input id="frequency-min" type="number" min="20" max="15999" value="110"></label>
             <label>最高周波数 (Hz)<input id="frequency-max" type="number" min="21" max="16000" value="3520"></label>
-            <label>パルス密度 (Hz)<input id="pulse-rate" type="number" min="0.25" max="16" step="0.25" value="3"></label>
+            <label>干渉の周波数差 (Hz)<input id="beat-hz" type="number" min="0.1" max="8" step="0.1" value="1.5"></label>
             <label>倍音の基音 (Hz)<input id="harmonic-fundamental" type="number" min="20" max="1000" step="1" value="55"></label>
           </div>
         </div>
         <p id="chapter-description" class="chapter-description"></p>
         <div class="compare-row"><button id="freeze-analysis">解析値を固定して比較</button><span id="sample-status" role="status">LIVE · 入力に追従</span><button id="chapter-reset">この章の初期値</button><button id="export-study">4章の設定を書き出す</button></div>
-        <p class="study-note">「解析値を固定」で同一フレームを4章に使用。各章の変更は端末に保存されます。周波数の上下限は各章で変更できます。矩形波・ノコギリ波等は倍音を含み、設定帯域は基音（ノイズは中心周波数）の範囲です。</p>
+        <p class="study-note">「解析値を固定」で同一フレームを4章に使用。各章の変更は端末に保存されます。周波数の上下限は各章で変更できます。三角波は倍音を含み、設定帯域は基音（ノイズは中心周波数）の範囲です。IVは近接する2音を持続させ、音の干渉を聴く章です。</p>
       </section>
       <details class="max-legacy"><summary>外部Maxとの接続について</summary>      <section class="max-monitor" aria-label="Maxの受信・出力確認">
         <div><strong>MAX / SPAT5</strong><span id="max-status" role="status">従来版12.1ch・sin波専用 / Core拡張は未対応</span></div>

@@ -32,7 +32,8 @@ function magnitude(audio, frequency) {
   return Math.hypot(cosine, sine) * 2 / audio.length;
 }
 
-test('five waveforms produce finite, bounded, distinct audio; sine remains the default', () => {
+test('three waveforms produce finite, bounded, distinct audio; sine remains the default', () => {
+  assert.deepEqual(WAVEFORMS, ['sine', 'noise', 'triangle']);
   const shapes = WAVEFORMS.map((waveform) => settled(voice({ waveform })).audio);
   for (const audio of shapes) {
     assert(rms(audio) > 0.0001);
@@ -43,12 +44,13 @@ test('five waveforms produce finite, bounded, distinct audio; sine remains the d
     assert(rms(difference) > 0.001, `${WAVEFORMS[i]} differs from ${WAVEFORMS[j]}`);
   }
   assert.deepEqual(settled(voice({ waveform: undefined })).audio, shapes[0]);
-  assert(magnitude(shapes[1], 1125) > magnitude(shapes[0], 1125) * 20, 'square adds odd harmonics');
-  assert(magnitude(shapes[2], 750) > magnitude(shapes[0], 750) * 20, 'saw adds even harmonics');
+  assert(magnitude(shapes[2], 1125) > magnitude(shapes[0], 1125) * 20, 'triangle adds odd harmonics');
+  for (const waveform of ['square', 'sawtooth'])
+    assert.deepEqual(settled(voice({ waveform })).audio, shapes[0], 'removed shapes fall back to sine');
 });
 
 test('high fundamentals discard partials that would fold below Nyquist', () => {
-  for (const waveform of ['square', 'sawtooth', 'triangle']) {
+  for (const waveform of ['triangle']) {
     const { audio } = settled(voice({ waveform, frequency: 10000, gain: 0.01 }));
     const fundamental = magnitude(audio, 10000);
     assert(fundamental > 0.0001);
@@ -59,7 +61,7 @@ test('high fundamentals discard partials that would fold below Nyquist', () => {
     assert(magnitude(high, 3000) < highFundamental * 0.002, `${waveform}: no folded third partial at 15 kHz`);
   }
   const synth = new SynthCore(rate, 2);
-  synth.update([voice({ frequency: 1e12, waveform: 'square' })]);
+  synth.update([voice({ frequency: 1e12, waveform: 'triangle' })]);
   assert.equal(synth.frequency[0], 16000);
   assert(advance(synth, 1024)[0].every(Number.isFinite));
 });
@@ -78,27 +80,58 @@ test('noise is deterministic and concentrated around its selected band center', 
   assert(averagePower(3000) > averagePower(12000) * 10);
 });
 
-test('pulse organization gates within a render block and honors duty and phase', () => {
-  const { audio } = settled(voice({ organization: 'pulse', pulseRate: 4, pulseWidth: 0.3 }));
-  // Capture starts at 0.5 s, an exact pulse-cycle boundary.
-  assert(rms(audio.subarray(1000, 2500)) > 0.005);
-  assert(rms(audio.subarray(6500, 9500)) < 0.00001);
-  const shifted = settled(voice({ organization: 'pulse', pulseRate: 4, pulseWidth: 0.3, phaseOffset: 0.5 })).audio;
-  assert(rms(shifted.subarray(1000, 2500)) < 0.00001);
-  assert(rms(shifted.subarray(6500, 8500)) > 0.005);
-  assert(rms(settled(voice({ organization: 'pulse', pulseWidth: 0 })).audio) < 0.00001);
-  const full = settled(voice({ organization: 'pulse', pulseWidth: 1 })).audio;
-  assert(Math.abs(rms(full) - rms(settled(voice()).audio)) < 0.00001);
+test('interference contains two nearby sustained frequencies without amplitude gating', () => {
+  const source = voice({ frequency: 375, organization: 'interference', detuneHz: 2 });
+  const { synth, audio } = settled(source, 1);
+  const low = magnitude(audio, 374), high = magnitude(audio, 376);
+  assert(low > 0.01 && high > 0.01, 'both nearby frequencies remain audible');
+  assert(Math.abs(low - high) < 0.0001, 'paired oscillators share half gain');
+  assert(magnitude(audio, 375) < Math.min(low, high) * 0.001, 'single center tone is fully crossfaded out');
+  assert(magnitude(audio, 372) < Math.min(low, high) * 0.001, 'no modulation gate sidebands');
+  assert(Math.abs(synth.gain[0] - source.gain) < 0.00001, 'source gain stays constant through beats');
+  for (let offset = 0; offset + 960 <= audio.length; offset += 960)
+    assert(rms(audio.subarray(offset, offset + 960)) > 0.00005, 'no timed silent gap');
+  const ordinary = settled(voice(), 1).audio;
+  assert(Math.max(...audio.map(Math.abs)) <= Math.max(...ordinary.map(Math.abs)) + 0.00001,
+    'the pair does not double the source peak');
+  const samePitch = settled(voice({ organization: 'interference', detuneHz: 0 }), 1).audio;
+  assert.deepEqual(samePitch, ordinary, 'coincident pair reduces to the original continuous waveform');
+});
+
+test('interference enters and leaves smoothly while retaining source IDs through voice 257', () => {
+  const source = voice({ id: 257 });
+  const { synth } = settled(source);
+  for (const organization of ['interference', 'sustain']) {
+    const previous = advance(synth, 128)[0].at(-1);
+    synth.update([voice({ id: 257, organization, detuneHz: 8 })]);
+    const next = advance(synth, 128)[0];
+    assert(Math.abs(next[0] - previous) < 0.003);
+    assert.equal(synth.targets.length, 257);
+    assert.equal(synth.targets[256] > 0, true);
+    assert(synth.targets.slice(0, 256).every((gain) => gain === 0));
+    advance(synth, 24000, { sources: [voice({ id: 257, organization, detuneHz: 8 })] });
+  }
+});
+
+test('noise interference uses independent filtered bands with finite continuous output', () => {
+  const source = voice({ waveform: 'noise', frequency: 3000, organization: 'interference', detuneHz: 8 });
+  const { synth, audio } = settled(source, 1);
+  assert.notEqual(synth.pairNoiseState[0][0], synth.pairNoiseState[1][0]);
+  assert.notDeepEqual(synth.pairNoiseCoefficients[0][0], synth.pairNoiseCoefficients[1][0]);
+  assert(audio.every(Number.isFinite));
+  for (let offset = 0; offset + 960 <= audio.length; offset += 960)
+    assert(rms(audio.subarray(offset, offset + 960)) > 0.0001);
+  assert.deepEqual(audio, settled(source, 1).audio, 'seeded streams remain reproducible');
 });
 
 test('waveform transitions crossfade without an instantaneous jump', () => {
   const { synth } = settled(voice());
   const previous = advance(synth, 128)[0].at(-1);
-  synth.update([voice({ waveform: 'square' })]);
+  synth.update([voice({ waveform: 'triangle' })]);
   const next = advance(synth, 128)[0];
   assert(Math.abs(next[0] - previous) < 0.003);
   assert(synth.waveMix[0][0] > 0.8, 'old waveform is still present in the first block');
-  assert(synth.waveMix[0][1] > 0 && synth.waveMix[0][1] < 0.2);
+  assert(synth.waveMix[0][2] > 0 && synth.waveMix[0][2] < 0.2);
 });
 
 test('Core routes to all 17 mains, arm channel 17, and sub on channel 18', () => {
@@ -126,25 +159,22 @@ test('stereo position spans the full 7 m Core room', () => {
 
 test('missing state fades out after 1.5 seconds; malformed voices cannot poison output', () => {
   const synth = new SynthCore(rate, 18);
-  synth.update([voice(), voice({ id: 257, waveform: 'sawtooth' }), voice({ id: 1.5 }), voice({ gain: NaN }), null]);
+  synth.update([voice(), voice({ id: 257, waveform: 'triangle' }), voice({ id: 1.5 }), voice({ gain: NaN }), null]);
   assert(rms(advance(synth, 24000)[0]) > 0);
   const stale = advance(synth, rate * 2);
   assert(rms(stale[0].subarray(stale[0].length - 4096)) < 1e-7);
-  const loud = Array.from({ length: 257 }, (_, i) => voice({ id: i + 1, waveform: WAVEFORMS[i % 5], gain: 0.65 }));
+  const loud = Array.from({ length: 257 }, (_, i) => voice({ id: i + 1, waveform: WAVEFORMS[i % WAVEFORMS.length], gain: 0.65 }));
   const resumed = advance(synth, 12000, { sources: loud, volume: 0.8 });
   assert(resumed.every((channel) => channel.every((sample) => Number.isFinite(sample) && Math.abs(sample) <= 1)));
 });
 
 test('invalid optional sound fields use finite defaults for every organization and waveform', () => {
-  for (const waveform of WAVEFORMS) for (const organization of ['sustain', 'pulse', 'harmonic', 'texture']) {
+  for (const waveform of WAVEFORMS) for (const organization of ['sustain', 'harmonic', 'texture', 'interference']) {
     const synth = new SynthCore(NaN, Infinity);
     assert.equal(synth.sampleRate, 48000);
     assert.equal(synth.channels, 2);
-    synth.update([voice({ waveform, organization, pulseRate: NaN, pulseWidth: Infinity,
-      phaseOffset: -Infinity, noiseQ: 'invalid' })], 0.2);
-    assert.equal(synth.pulseRate[0], 2);
-    assert(Math.abs(synth.pulseWidth[0] - 0.35) < 1e-6);
-    assert.equal(synth.phaseOffset[0], 0);
+    synth.update([voice({ waveform, organization, detuneHz: NaN, noiseQ: 'invalid' })], 0.2);
+    assert.equal(synth.detuneHz[0], organization === 'interference' ? 1.5 : 0);
     assert([...synth.noiseCoefficients[0]].every(Number.isFinite));
     const audio = advance(synth, 4096);
     assert(audio.every((channel) => channel.every(Number.isFinite)), `${waveform}/${organization}`);

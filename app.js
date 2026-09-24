@@ -11,6 +11,7 @@ import { ShadowAudio } from "./audio.js";
 import { CHAPTERS, getChapter, normalizeSoundSettings, applyChapter } from "./chapters.js";
 import { renderSignalField } from "./field-visual.js";
 import { createCoreSpeakers } from "./core-layout.js";
+import { migrateStudy } from "./study-state.js";
 const $ = (id) => document.getElementById(id),
   canvases = ["live", "analysis", "generated", "spatial"].map($),
   contexts = canvases.map((c) =>
@@ -49,27 +50,27 @@ let stream = null,
   records = [];
 const speakers = createCoreSpeakers();
 let chapterId = "sustain", chapterSettings = {}, frozenStudy = null, currentSourceId = "", lastVisual = 0;
-const WAVE_LABELS = {sine:"sin波（従来版）",square:"矩形波",sawtooth:"ノコギリ波",triangle:"三角波",noise:"帯域ノイズ"};
+const WAVE_LABELS = {sine:"sin波（従来版）",noise:"帯域ノイズ",triangle:"三角波"};
 try {
   const saved = JSON.parse(localStorage.getItem("desymmetrical-core-study-v1") || "null");
-  if (saved) { chapterId = getChapter(saved.chapterId).id; chapterSettings = saved.settings || {}; }
+  const restored = migrateStudy(saved);
+  chapterId = restored.chapterId; chapterSettings = restored.settings;
 } catch {}
 function soundSettings() {
   return normalizeSoundSettings({chapter: chapterId, waveform:$("waveform").value, organization:$("organization").value,
     frequencyMin:Number($("frequency-min").value), frequencyMax:Number($("frequency-max").value),
-    pulseRate:Number($("pulse-rate").value), harmonicFundamental:Number($("harmonic-fundamental").value),
-    pulseWidth: chapterSettings[chapterId]?.pulseWidth ?? getChapter(chapterId).pulseWidth});
+    beatHz:Number($("beat-hz").value), harmonicFundamental:Number($("harmonic-fundamental").value)});
 }
 function saveSound() {
   chapterSettings[chapterId] = soundSettings();
-  try { localStorage.setItem("desymmetrical-core-study-v1", JSON.stringify({chapterId,settings:chapterSettings})); } catch {}
+  try { localStorage.setItem("desymmetrical-core-study-v1", JSON.stringify({version:2,chapterId,settings:chapterSettings})); } catch {}
 }
 function updateSoundUI() {
   const settings = soundSettings(), chapter = getChapter(chapterId);
   $("current-wave").textContent = WAVE_LABELS[settings.waveform];
-  $("pulse-rate").disabled = settings.organization !== "pulse";
+  $("beat-hz").disabled = settings.organization !== "interference";
   $("harmonic-fundamental").disabled = settings.organization !== "harmonic";
-  $("chapter-description").textContent = getChapter(settings.organization).mapping + " / 現在: " + WAVE_LABELS[settings.waveform] + " · " + settings.frequencyMin + "–" + settings.frequencyMax + " Hz";
+  $("chapter-description").textContent = getChapter(settings.organization).mapping + " / 現在: " + WAVE_LABELS[settings.waveform] + " · " + settings.frequencyMin + "–" + settings.frequencyMax + " Hz" + (settings.organization === "interference" ? (settings.waveform === "noise" ? " / 2つの近接帯域を重ねる持続ノイズ" : " / 周波数差 " + settings.beatHz + " Hzを基準にした持続音の重なり") : "");
   $("stage-mode").textContent = `${chapter.number} / ${chapter.title}`;
   $("stage-readout").textContent = `${$("bands").value} TONE LAYERS · ${WAVE_LABELS[settings.waveform]} · ${settings.organization.toUpperCase()}`;
   document.querySelectorAll("[data-chapter]").forEach(b => {
@@ -82,12 +83,12 @@ function updateSoundUI() {
   });
   const ctx = $("wave-preview").getContext("2d");
   ctx.clearRect(0,0,240,70); ctx.strokeStyle="#d4d2cc";ctx.lineWidth=1.5;ctx.beginPath();
-  for (let x=0;x<240;x++) { const phase=(x/80)%1; const v=settings.waveform==="sine"?Math.sin(phase*Math.PI*2):settings.waveform==="square"?(phase<.5?1:-1):settings.waveform==="sawtooth"?phase*2-1:settings.waveform==="triangle"?1-4*Math.abs(phase-.5):Math.sin(x*4.91)*Math.sin(x*.83); const y=35-v*22; x?ctx.lineTo(x,y):ctx.moveTo(x,y); }ctx.stroke();
+  for (let x=0;x<240;x++) { const phase=(x/80)%1; const v=settings.waveform==="sine"?Math.sin(phase*Math.PI*2):settings.waveform==="triangle"?1-4*Math.abs(phase-.5):Math.sin(x*4.91)*Math.sin(x*.83); const y=35-v*22; x?ctx.lineTo(x,y):ctx.moveTo(x,y); }ctx.stroke();
 }
 function selectChapter(id, reset=false) {
   chapterId = getChapter(id).id;
   const settings = normalizeSoundSettings(reset ? getChapter(id) : {...getChapter(id),...chapterSettings[id], chapter:id});
-  for (const [key,control] of Object.entries({waveform:"waveform",organization:"organization",frequencyMin:"frequency-min",frequencyMax:"frequency-max",pulseRate:"pulse-rate",harmonicFundamental:"harmonic-fundamental"})) $(control).value=settings[key];
+  for (const [key,control] of Object.entries({waveform:"waveform",organization:"organization",frequencyMin:"frequency-min",frequencyMax:"frequency-max",beatHz:"beat-hz",harmonicFundamental:"harmonic-fundamental"})) $(control).value=settings[key];
   chapterSettings[id] = settings; previousSources=[]; updateSoundUI(); saveSound();
 }
 for (const chapter of CHAPTERS) {
@@ -109,8 +110,8 @@ $("freeze-analysis").onclick=()=>{
   for(const el of document.querySelectorAll("[data-freeze-lock]"))el.disabled=true;
 };
 $("chapter-reset").onclick=()=>selectChapter(chapterId,true);
-for(const id of ["waveform","organization","pulse-rate","harmonic-fundamental"]) $(id).onchange=()=>{const s=soundSettings();$("pulse-rate").value=s.pulseRate;$("harmonic-fundamental").value=s.harmonicFundamental;updateSoundUI();saveSound();};
-$("export-study").onclick=()=>{saveSound();download("de-symmetrical-core-study.json",JSON.stringify({version:2,chapter:chapterId,chapters:Object.fromEntries(CHAPTERS.map(c=>[c.id,chapterSettings[c.id]||normalizeSoundSettings(c)])),sampleId:frozenStudy?.id||currentSourceId,fixed:!!frozenStudy,analysis:features?summarize(features):null,sources,speakers},null,2));};
+for(const id of ["waveform","organization","beat-hz","harmonic-fundamental"]) $(id).onchange=()=>{const s=soundSettings();$("beat-hz").value=s.beatHz;$("harmonic-fundamental").value=s.harmonicFundamental;updateSoundUI();saveSound();};
+$("export-study").onclick=()=>{saveSound();download("de-symmetrical-core-study.json",JSON.stringify({version:3,chapter:chapterId,chapters:Object.fromEntries(CHAPTERS.map(c=>[c.id,chapterSettings[c.id]||normalizeSoundSettings(c)])),sampleId:frozenStudy?.id||currentSourceId,fixed:!!frozenStudy,analysis:features?summarize(features):null,sources,speakers},null,2));};
 function options() {
   return {
     ...soundSettings(),

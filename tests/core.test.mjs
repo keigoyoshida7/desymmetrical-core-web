@@ -74,12 +74,12 @@ test("one frozen analysis supports every chapter without altering the captured f
     assert.ok(rendered.every((sources) => sources[layer].density === captured.layers[layer].density));
     assert.ok(rendered.every((sources) => sources[layer].gain === rendered[0][layer].gain));
   }
-  assert.notDeepEqual(rendered[0].map((source) => source.frequency), rendered[2].map((source) => source.frequency));
-  assert.ok(rendered[1].some((source) => source.phaseOffset > 0));
-  assert.ok(rendered[3].some((source, index) => source.spread > rendered[0][index].spread));
-  const settings = normalizeSoundSettings({ chapterId: "sustain", waveform: "sawtooth", frequencyMin: 1000, frequencyMax: 10000 });
+  assert.notDeepEqual(rendered[0].map((source) => source.frequency), rendered[1].map((source) => source.frequency));
+  assert.ok(rendered[3].every((source) => source.detuneHz > 0));
+  assert.ok(rendered[2].some((source, index) => source.spread > rendered[0][index].spread));
+  const settings = normalizeSoundSettings({ chapterId: "sustain", waveform: "triangle", frequencyMin: 1000, frequencyMax: 10000 });
   const altered = applyChapter(toSources(frozen, settings), frozen, settings);
-  assert.equal(altered[0].waveform, "sawtooth");
+  assert.equal(altered[0].waveform, "triangle");
   close(altered[0].frequency, 1000);
   close(altered.at(-1).frequency, 10000);
   assert.deepEqual(frozen, captured);

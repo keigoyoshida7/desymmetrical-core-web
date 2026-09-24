@@ -1,7 +1,7 @@
 // These four chapters are provisional listening experiments, not fixed scores
 // prescribed by the Core PDF. All consume the same acquired shadow features.
-export const WAVEFORMS = ["sine", "square", "sawtooth", "triangle", "noise"];
-export const ORGANIZATIONS = ["sustain", "pulse", "harmonic", "texture"];
+export const WAVEFORMS = ["sine", "noise", "triangle"];
+export const ORGANIZATIONS = ["sustain", "harmonic", "texture", "interference"];
 
 export const CHAPTERS = [
   {
@@ -17,30 +17,12 @@ export const CHAPTERS = [
     organization: "sustain",
     frequencyMin: 110,
     frequencyMax: 3520,
-    pulseRate: 2,
-    pulseWidth: 0.18,
-    harmonicFundamental: 55,
-  },
-  {
-    id: "pulse",
-    number: "II",
-    title: "点滅 / Pulse",
-    subtitle: "同じ濃淡を、時間差のある出来事へ",
-    description: "矩形波を短いパルスに分割。濃淡ごとに発音時刻をずらし、影の層を時間の列として聴きます。",
-    material: "矩形波",
-    organizationLabel: "周期的なパルス・濃淡順の時間差",
-    mapping: "濃淡 → 音高と発音位相 ／ 密度 → パルス音量",
-    waveform: "square",
-    organization: "pulse",
-    frequencyMin: 220,
-    frequencyMax: 1760,
-    pulseRate: 3,
-    pulseWidth: 0.18,
+    beatHz: 1.5,
     harmonicFundamental: 55,
   },
   {
     id: "harmonic",
-    number: "III",
+    number: "II",
     title: "倍音 / Harmonic",
     subtitle: "濃淡を、共通の基音を持つ音の関係へ",
     description: "三角波の音高を基音の整数倍へ量子化。濃淡順に水平円周へ配置し、連続した濃淡から倍音の関係を作ります。",
@@ -51,13 +33,12 @@ export const CHAPTERS = [
     organization: "harmonic",
     frequencyMin: 55,
     frequencyMax: 880,
-    pulseRate: 2,
-    pulseWidth: 0.18,
+    beatHz: 1.5,
     harmonicFundamental: 55,
   },
   {
     id: "texture",
-    number: "IV",
+    number: "III",
     title: "粒子 / Texture",
     subtitle: "音高の層を、帯域と広がりの質感へ",
     description: "帯域を絞ったノイズを重ねます。濃淡を各帯域の中心周波数へ、半影の広さを音像の広がりへ変換します。",
@@ -68,8 +49,23 @@ export const CHAPTERS = [
     organization: "texture",
     frequencyMin: 800,
     frequencyMax: 8000,
-    pulseRate: 2,
-    pulseWidth: 0.18,
+    beatHz: 1.5,
+    harmonicFundamental: 55,
+  },
+  {
+    id: "interference",
+    number: "IV",
+    title: "干渉 / Interference",
+    subtitle: "近接する持続音の間に、ゆっくりしたうなりを",
+    description: "各層をわずかに周波数が異なる二つの持続音に重ねます。濃淡から周波数差を作り、音を途切れさせずに干渉のうなりを聴きます。帯域ノイズでは近接した二つの帯域が重なり、規則的なうなりにはなりません。",
+    material: "正弦波の近接ペア",
+    organizationLabel: "近接周波数の持続・干渉",
+    mapping: "濃淡 → 中心周波数と周波数差 ／ 密度 → 音量 ／ 重心 → 位置",
+    waveform: "sine",
+    organization: "interference",
+    frequencyMin: 110,
+    frequencyMax: 1760,
+    beatHz: 1.5,
     harmonicFundamental: 55,
   },
 ];
@@ -96,8 +92,7 @@ export function normalizeSoundSettings(settings = {}) {
     organization: ORGANIZATIONS.includes(input.organization) ? input.organization : chapter.organization,
     frequencyMin,
     frequencyMax,
-    pulseRate: clamp(numberOr(input.pulseRate, chapter.pulseRate), 0.25, 16),
-    pulseWidth: clamp(numberOr(input.pulseWidth, chapter.pulseWidth), 0.02, 0.9),
+    beatHz: clamp(numberOr(input.beatHz, chapter.beatHz), 0.1, 8),
     harmonicFundamental: clamp(numberOr(input.harmonicFundamental, chapter.harmonicFundamental), 20, 1000),
   };
 }
@@ -117,10 +112,7 @@ export function applyChapter(sources, features, settings = {}) {
       frequency: clamp(numberOr(source.frequency, mappedFrequency), sound.frequencyMin, sound.frequencyMax),
       waveform: sound.waveform,
       organization: sound.organization,
-      pulseRate: sound.pulseRate,
-      pulseWidth: sound.pulseWidth,
-      // A stable phase in cycles makes pulses independent of rendering FPS.
-      phaseOffset: sound.organization === "pulse" ? tone * 0.75 : 0,
+      detuneHz: 0,
     };
 
     if (sound.organization === "harmonic") {
@@ -140,6 +132,13 @@ export function applyChapter(sources, features, settings = {}) {
       next.x = Math.sin(angle) * 2.5;
       next.y = Math.cos(angle) * 2.5;
       // Retain the Core height mapping and measured amplitude.
+    } else if (sound.organization === "interference") {
+      // Keep both centers in the selected frequency band, even for a narrow
+      // user-defined range. The pair remains one Core source and one source ID.
+      next.detuneHz = Math.min(sound.beatHz * (0.5 + tone), sound.frequencyMax - sound.frequencyMin);
+      next.frequency = clamp(next.frequency,
+        sound.frequencyMin + next.detuneHz / 2,
+        sound.frequencyMax - next.detuneHz / 2);
     } else if (sound.organization === "texture") {
       const spread = clamp(numberOr(source.spread, 0));
       next.spread = clamp(Math.max(spread, 0.35) + penumbra * 0.45);
