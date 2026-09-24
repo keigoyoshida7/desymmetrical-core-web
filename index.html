@@ -9,7 +9,7 @@
       content="影の階調、輪郭、半影を測り、層状の空間音響へ変換する De-symmetrical Core の観測環境。" data-en-content="An observation environment for De-symmetrical Core, measuring shadow tone, contours and penumbra and translating them into layered spatial sound."
     />
     <title>De-symmetrical Core · Shadow Lab</title>
-    <link rel="stylesheet" href="./style.css?v=jp-en-1" />
+    <link rel="stylesheet" href="./style.css?v=transport-volume-1" />
   </head>
   <body>
     <header>
@@ -36,7 +36,17 @@
             <option>16</option>
             <option selected>30</option>
             <option>64</option><option>256</option>
-          </select></label><div class="transport-controls"><span id="state" class="status" data-en="Test signal">テスト信号</span><button id="max-connect" hidden data-en="Connect to Max">Maxへ接続</button><button id="audio-start" class="primary" data-en="Start audio">ブラウザで試聴</button><button id="stop" class="stop" data-en="Stop">停止</button></div><span class="toolbar-end" id="performance" data-en="Preparing analysis">観測を準備中</span>
+          </select></label><div class="transport-controls"><span id="state" class="status" data-en="Test signal">テスト信号</span><button id="max-connect" hidden data-en="Connect to Max">Maxへ接続</button><button id="audio-start" class="primary" data-en="Start audio">ブラウザで試聴</button><button id="stop" class="stop" data-en="Stop">停止</button>
+            <div class="transport-audio"><span id="audio-status" data-en="STEREO MONITOR · Stopped">STEREO MONITOR · 停止中</span><label class="inline transport-volume"
+              ><span data-en="Volume">音量</span><input
+                id="volume"
+                type="range"
+                min="0"
+                max="0.8"
+                step="0.01"
+                value="0.2"
+              /><output id="volume-value">20%</output></label></div>
+          </div><span class="toolbar-end" id="performance" data-en="Preparing analysis">観測を準備中</span>
       </section>
       <div id="notice" role="status" data-en="Analysis starts with a test signal. Select “Connect camera” to measure a real shadow, or “Start audio” to listen.">
         テスト信号で解析を開始します。実物の影を測るには「カメラを接続」を押してください。音を聴くには「ブラウザで試聴」。
@@ -145,17 +155,7 @@
               aria-label="階調別の周波数と音源位置を示す三次元層表示" data-en-aria-label="Three-dimensional layers showing frequency and source position by tone band"
             ></canvas><span class="canvas-note">DARKER / LOWER</span>
           </div>
-          <div class="panel-foot">
-            <span id="audio-status" data-en="STEREO MONITOR · Stopped">STEREO MONITOR · 停止中</span><label class="inline"
-              ><span data-en="Volume">音量</span><input
-                id="volume"
-                type="range"
-                min="0"
-                max="0.8"
-                step="0.01"
-                value="0.2"
-              /><output id="volume-value">20%</output></label>
-          </div>
+
         </article>
       </section>
       <section class="lower">
