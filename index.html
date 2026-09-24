@@ -42,7 +42,7 @@
           ><span data-en="Tone bands">階調</span><select id="bands" data-freeze-lock>
             <option>16</option>
             <option selected>30</option>
-            <option>64</option><option>256</option>
+            <option>64</option>
           </select></label><div class="transport-controls"><span id="state" class="status" data-en="Test signal">テスト信号</span><button id="max-connect" hidden data-en="Connect to Max">Maxへ接続</button><button id="audio-start" class="primary" data-en="Start audio">ブラウザで試聴</button><button id="stop" class="stop" data-en="Stop">停止</button>
             <div class="transport-audio"><span id="audio-status" data-en="STEREO MONITOR · Stopped">STEREO MONITOR · 停止中</span><label class="inline transport-volume"
               ><span data-en="Volume">音量</span><input
@@ -199,7 +199,6 @@
               ><span data-en="Comparison">比較</span><select id="comparison" data-freeze-lock>
                 <option value="none" data-en="Off">オフ</option>
                 <option value="transform" data-en="Transform test">変形テスト</option>
-                <option value="file" data-en="Load image">画像を読込</option>
                 <option value="endpoint" data-en="Connect StreamDiffusion">StreamDiffusion 接続</option>
               </select></label>
           </div>
@@ -301,8 +300,8 @@
           </details>
           <details>
             <summary data-en="Reference specification and measurement conditions">資料との対応と測定の条件</summary>
-            <p data-en="The default 30 tone layers + 1 comparison layer follow Core EN v22 (pp. 10–11). The shared starting point maps tone to frequency and height, cell centroid to XYZ, area to spread, and penumbra width to reverb. You can also select 16, 64 or 256 tone bands. The four chapters’ sound organization, frequency ranges and timbres are proposals for exploration.">
-              Core EN v22（p.10–11）の30階調＋比較1層を初期値に採用。階調→周波数・高さ、セル重心→XYZ、面積→広がり、半影幅→残響を共通の出発点にします。16 / 64 / 256階調も選べます。4章の具体的な音組織、周波数範囲、音色は検討用の実装案です。
+            <p data-en="The default 30 tone layers + 1 comparison layer follow Core EN v22 (pp. 10–11). The shared starting point maps tone to frequency and height, cell centroid to XYZ, area to spread, and penumbra width to reverb. You can also select 16 or 64 tone bands. The four chapters’ sound organization, frequency ranges and timbres are proposals for exploration.">
+              Core EN v22（p.10–11）の30階調＋比較1層を初期値に採用。階調→周波数・高さ、セル重心→XYZ、面積→広がり、半影幅→残響を共通の出発点にします。16 / 64階調も選べます。4章の具体的な音組織、周波数範囲、音色は検討用の実装案です。
             </p>
             <p data-en="A single camera image cannot fully distinguish dark objects from shadows. Capture a reference on an evenly lit surface and keep the shadow within the analysis region. Penumbra width is estimated from gradients. This browser version uses one RGB camera and does not reproduce the two shadow cameras, robot tracking or venue calibration described in the reference.">
               カメラの暗い物体と影は単眼画像だけでは完全に分離できません。均一な明るい面で基準を取得し、影を解析範囲に収めてください。半影幅は勾配に基づく推定値です。ブラウザ版はカメラ1系統のRGB入力で、資料の2台の影カメラ、ロボット位置追跡、会場校正を再現するものではありません。
@@ -333,12 +332,7 @@
     <footer>
       <span>KEIGO YOSHIDA · DE-SYMMETRICAL CORE</span><span data-en="OBSERVATION / COMPARISON / SOUND">観測 / 比較 / 音響</span>
     </footer>
-    <video id="video" playsinline muted hidden></video><input id="file" type="file" accept="image/*,video/*" hidden /><input
-      id="comparison-file"
-      type="file"
-      accept="image/*"
-      hidden
-    />
-    <script type="module" src="./app.js?v=mobile-audio-1"></script>
+    <video id="video" playsinline muted hidden></video><input id="file" type="file" accept="image/*,video/*" hidden />
+    <script type="module" src="./app.js?v=menu-options-1"></script>
   </body>
 </html>

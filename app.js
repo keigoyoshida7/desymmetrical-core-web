@@ -43,7 +43,6 @@ let stream = null,
   generationBusy = false,
   generationEpoch = 0,
   generationAbort = null,
-  uploadComparison = null,
   socket = null,
   lastBridge = 0,
   frameToken = 0,
@@ -88,12 +87,10 @@ const MESSAGES = {
   "画像は data:image または blob 形式が必要です。": "The image must use a data:image or blob URL.",
   "比較像を接続すると、差分が音に加わります。": "Connect a comparison image to add its difference to the sound.",
   "変形テスト · AI未使用": "Transform test · No AI",
-  "読込画像 · 静的な比較参照（音へは未採用）": "Loaded image · Static reference (not included in audio)",
   "生成サービスの URL を設定してください": "Set the generation service URL",
   "生成サービスにはHTTPSを使用してください。": "Use HTTPS for the generation service.",
   "生成元に StreamDiffusion の識別がありません。": "The generation source is not identified as StreamDiffusion.",
   "StreamDiffusion · 外部接続": "StreamDiffusion · External connection",
-  "静的参照 · 生成の由来は未検証": "Static reference · Generation provenance unverified",
   "由来が一致しません": "Source provenance does not match",
   "比較画像が古いか時刻が無効です": "Comparison image is stale or its timestamp is invalid",
   "比較値が範囲外です": "Comparison value is out of range",
@@ -644,7 +641,7 @@ function renderComparisonPlaceholder() {
 }
 async function updateComparison(frame, real, sourceId, at, t) {
   const mode = $("comparison").value;
-  if (mode === "none") {
+  if (!["transform", "endpoint"].includes(mode)) {
     renderComparisonPlaceholder();
     return;
   }
@@ -663,10 +660,6 @@ async function updateComparison(frame, real, sourceId, at, t) {
     if (mode === "transform") {
       data = transformFrame(frame, Number($("deviation").value));
       origin = "変形テスト · AI未使用";
-    } else if (mode === "file") {
-      if (!uploadComparison) return;
-      data = imagePixels(uploadComparison, frame.width, frame.height);
-      origin = "読込画像 · 静的な比較参照（音へは未採用）";
     } else {
       const endpoint = $("endpoint").value;
       if (!endpoint) {
@@ -715,22 +708,15 @@ async function updateComparison(frame, real, sourceId, at, t) {
     if (epoch !== generationEpoch) return;
     const gf = analyze(data, frame.width, frame.height, settings),
       distance = compareFeatures(real, gf),
-      checked =
-        mode === "file"
-          ? {
-              valid: false,
-              label: "hold",
-              reason: "静的参照 · 生成の由来は未検証",
-            }
-          : validator.validate({
-              sourceId,
-              generatedFrom,
-              generatedId,
-              sourceAt: at,
-              generatedAt,
-              distance,
-              target: Number($("target").value),
-            });
+      checked = validator.validate({
+        sourceId,
+        generatedFrom,
+        generatedId,
+        sourceAt: at,
+        generatedAt,
+        distance,
+        target: Number($("target").value),
+      });
     comparison = {
       ...checked,
       features: gf,
@@ -1112,23 +1098,7 @@ $("file").onchange = async (e) => {
 $("file").oncancel = () => {
   $("source").value = source;
 };
-$("comparison").onchange = () => {
-  resetComparison();
-  if ($("comparison").value === "file") $("comparison-file").click();
-};
-$("comparison-file").onchange = async (e) => {
-  const f = e.target.files[0];
-  if (!f) return;
-  const u = URL.createObjectURL(f);
-  try {
-    uploadComparison = await decodeImage(u);
-    resetComparison();
-  } catch (e) {
-    notice(e.message, true);
-  } finally {
-    URL.revokeObjectURL(u);
-  }
-};
+$("comparison").onchange = resetComparison;
 for (const id of [
   "threshold",
   "gamma",
@@ -1475,16 +1445,16 @@ if (document.modelContext?.registerTool) {
     {
       name: "configure_shadow_bands",
       description:
-        "Set the same 16, 30, 64 or 256 tone-band setting visible in the UI.",
+        "Set the same 16, 30 or 64 tone-band setting visible in the UI.",
       inputSchema: {
         type: "object",
-        properties: { bands: { type: "integer", enum: [16, 30, 64, 256] } },
+        properties: { bands: { type: "integer", enum: [16, 30, 64] } },
         required: ["bands"],
         additionalProperties: false,
       },
       execute: (input) => {
-        if (![16, 30, 64, 256].includes(input?.bands))
-          throw Error("bands must be 16, 30, 64 or 256");
+        if (![16, 30, 64].includes(input?.bands))
+          throw Error("bands must be 16, 30 or 64");
         $("bands").value = input.bands;
         resetAnalysis();
         return { bands: input.bands };
