@@ -50,7 +50,7 @@ let stream = null,
   records = [];
 const speakers = createCoreSpeakers();
 let chapterId = "sustain", chapterSettings = {}, frozenStudy = null, currentSourceId = "", lastVisual = 0;
-const WAVE_LABELS = {sine:"sin波（従来版）",noise:"帯域ノイズ",triangle:"三角波"};
+const WAVE_LABELS = {sine:"sin波",noise:"帯域ノイズ",triangle:"三角波"};
 try {
   const saved = JSON.parse(localStorage.getItem("desymmetrical-core-study-v1") || "null");
   const restored = migrateStudy(saved);
